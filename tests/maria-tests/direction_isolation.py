@@ -37,7 +37,7 @@ def run_cartesian(tracer, cell_quad_pts, r_range, phi_range, z_range,
 # ── Parameters ──────────────────────────────────────────────────────────
 
 # Particle parameters:
-nparticles = 256 # number of particles to trace
+nparticles = 16 # number of particles to trace
 energy = 500 * ONE_EV # kinetic energy of particles [J]
 mass = PROTON_MASS  # mass of particles [kg]
 charge = ELEMENTARY_CHARGE # charge of particles [C]
