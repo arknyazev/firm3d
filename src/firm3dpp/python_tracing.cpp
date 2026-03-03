@@ -163,6 +163,40 @@ void init_tracing(py::module_ &m){
         );
 
 
+    m.def("cartesian_gpu_tracing_backward", &cartesian_gpu_tracing_backward,
+        py::arg("quad_pts"),
+        py::arg("srange"),
+        py::arg("trange"),
+        py::arg("zrange"),
+        py::arg("stz_init"),
+        py::arg("m"),
+        py::arg("q"),
+        py::arg("vtotal"),
+        py::arg("vtang"),
+        py::arg("tmax"),
+        py::arg("tol"),
+        py::arg("nparticles")
+        );
+
+        
+    m.def("boozer_gpu_tracing_backward", &boozer_gpu_tracing_backward,
+        py::arg("quad_pts"),
+        py::arg("srange"),
+        py::arg("trange"),
+        py::arg("zrange"),
+        py::arg("stz_init"),
+        py::arg("m"),
+        py::arg("q"),
+        py::arg("vtotal"),
+        py::arg("vtang"),
+        py::arg("tmax"),
+        py::arg("tol"),
+        py::arg("psi0"),
+        py::arg("nparticles"),
+        py::arg("vacuum") = false
+        );
+
+
     m.def("boozer_saw_gpu_tracing", &boozer_saw_gpu_tracing,
         py::arg("quad_pts"),
         py::arg("srange"),

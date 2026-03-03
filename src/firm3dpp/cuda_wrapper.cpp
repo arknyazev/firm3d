@@ -29,3 +29,12 @@ extern "C" py::array_t<double> test_derivatives(py::array_t<double> quad_pts, py
 extern "C" vector<double> test_timestep(py::array_t<double> quad_pts, py::array_t<double> srange,
         py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
         double tol, double psi0, int nparticles);
+
+// NEW BY MARIA
+extern "C" vector<double> cartesian_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+        py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+        double tmax, double tol, int nparticles);
+
+extern "C" vector<double> boozer_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+        py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+        double tmax, double tol, double psi0, int nparticles, bool vacuum);

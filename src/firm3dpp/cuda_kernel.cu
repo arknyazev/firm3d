@@ -79,6 +79,10 @@ __constant__ double saw_srange_d[4]; // used for SAW RHS only
 __constant__ bool rescale_abstol_var_d = true;
 __constant__ bool is_test_d = false;
 
+// NEW BY MARIA
+// +1 forward tracing (default), -1 backward (set only by new backward entrypoints)
+__constant__ int dir_d = 1;
+
 /* shape computes shape functions for cubic interpolation on a a regular grid
  * we assume the point x has been rescaled to be on the grid 0, 1, 2, 3
  * i indicates which shape function we are computing
@@ -657,14 +661,22 @@ __device__ void build_state(double* x_temp, int deriv_id, bool* symmetry_exploit
                             double* x1_shape, double* x2_shape, double* x3_shape, double* state, double* derivs, double* t, double* dt){
 
     // store time
-    x_temp[threadIdx.x] = t[threadIdx.x] + dp5_t_wgts[deriv_id]*dt[threadIdx.x];
+    //x_temp[threadIdx.x] = t[threadIdx.x] + dp5_t_wgts[deriv_id]*dt[threadIdx.x];
+    // NEW BY MARIA (instead of line above)
+    // t[] is elapsed time >= 0 for control flow; physical time reverses with dir_d
+    double dt_signed = dt[threadIdx.x];
+    double t_phys = ((double)dir_d) * t[threadIdx.x];
+    x_temp[threadIdx.x] = t_phys + dp5_t_wgts[deriv_id] * dt_signed;
+    //
     for (int i = 0; i < 4; i++) {
         x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] = state[i*PARTICLES_PER_BLOCK + threadIdx.x];
     }
 
     for (int j=0; j<deriv_id; ++j){
         for(int i=0; i<4; ++i){
-            x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] += dt[threadIdx.x] * dp5_wgts[deriv_id][j] * derivs[(6*j+i)*PARTICLES_PER_BLOCK + threadIdx.x];
+            //x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] += dt[threadIdx.x] * dp5_wgts[deriv_id][j] * derivs[(6*j+i)*PARTICLES_PER_BLOCK + threadIdx.x];
+            // NEW BY MARIA (instead of line above)
+            x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] += dt_signed * dp5_wgts[deriv_id][j] * derivs[(6*j+i)*PARTICLES_PER_BLOCK + threadIdx.x];
         }
     }
     
@@ -771,7 +783,9 @@ __device__ void setup_particle(double* mu, double* t, double* dt, double* dtmax,
         calc_max_timestep_size<coord>(dtmax, x_temp, derivs);
         dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
 
-        dt[threadIdx.x] = 1e-3*dtmax[threadIdx.x];
+        //dt[threadIdx.x] = 1e-3*dtmax[threadIdx.x];
+        // NEW BY MARIA (instead of line above)
+        dt[threadIdx.x] = ((double)dir_d) * (1e-3 * dtmax[threadIdx.x]);
     }
 }
 
@@ -786,6 +800,12 @@ __device__ void check_has_left(bool* has_left, double* state, double* derivs){
 
 template<>
 __device__ void check_has_left<CoordSys::Cartesian>(bool* has_left, double* state, double* derivs){
+    // NEW BY MARIA
+    if(is_test_d){
+        has_left[threadIdx.x] = false;
+        return;
+    }
+    //
     has_left[threadIdx.x] = derivs[(6*6 + 5)*PARTICLES_PER_BLOCK + threadIdx.x] < 0; // boundary dist fn at new location
 }
 
@@ -805,6 +825,10 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
     if(has_left[threadIdx.x]){
         return;
     }
+    // NEW BY MARIA
+    double dt_signed = dt[threadIdx.x];
+    double dt_mag = fabs(dt_signed);
+    //
     const double bhat1 = 71.0 / 57600.0, bhat3 = -71.0 / 16695.0, bhat4 = 71.0 / 1920.0, bhat5 = -17253.0 / 339200.0, bhat6 = 22.0 / 525.0, bhat7 = -1.0 / 40.0;
     // Compute  error
     // https://live.boost.org/doc/libs/1_82_0/libs/numeric/odeint/doc/html/boost_numeric_odeint/odeint_in_detail/steppers.html
@@ -814,19 +838,28 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
     for(int i = 0; i < 4; i++) {
         double state_i = state[i*PARTICLES_PER_BLOCK + threadIdx.x];
         double deriv_i = derivs[(6*0 + i)*PARTICLES_PER_BLOCK + threadIdx.x];
-        err_elt = dt[threadIdx.x]*(bhat1 * deriv_i
+        //err_elt = dt[threadIdx.x]*(bhat1 * deriv_i
+        // NEW BY MARIA (instead of line above)
+        err_elt = dt_mag * (bhat1 * deriv_i
+        //
                                  + bhat3 * derivs[(6*2 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat4 * derivs[(6*3 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat5 * derivs[(6*4 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat6 * derivs[(6*5 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat7 * derivs[(6*6 + i)*PARTICLES_PER_BLOCK + threadIdx.x]);
         double atol_i = (rescale_abstol_var_d) && (i == 3) ?  atol_d * v_total_d : atol_d;
-        err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt[threadIdx.x]*fabs(deriv_i)));
+        //err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt[threadIdx.x]*fabs(deriv_i)));
+        // NEW BY MARIA (instead of line above)
+        err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt_mag * fabs(deriv_i)));
+        //
         max_err = fmax(max_err, err_elt);
     }
 
     // Compute new step size
-    double dt_new = dt[threadIdx.x]*0.9;
+    //double dt_new = dt[threadIdx.x]*0.9;
+    // NEW BY MARIA (instead of line above)
+    double dt_new = dt_mag * 0.9;
+    //
     double exponent = 0.0;
     if(max_err > 1.0){
         exponent = -1.0/3.0;
@@ -841,11 +874,17 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
     if(max_err <= 1.0) {
         // if the error is moderate, don't use a new step size
         if (0.5 < max_err){
-            dt_new = dt[threadIdx.x];
+            dt_new = dt_mag;    // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
         }
         // Accept the step
-        t[threadIdx.x] += dt[threadIdx.x];
-        dt[threadIdx.x] = fmin(dt_new, tmax_d - t[threadIdx.x]);
+        t[threadIdx.x] += dt_mag;    // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
+        //dt[threadIdx.x] = fmin(dt_new, tmax_d - t[threadIdx.x]);
+        // NEW BY MARIA (instead of line above)
+        // next signed dt: preserve direction, clamp remaining elapsed time
+        double remaining = tmax_d - t[threadIdx.x];
+        double next_mag = fmin(dt_new, remaining);
+        dt[threadIdx.x] = ((double)dir_d) * next_mag;
+        //
 
         for(int i = 0; i < 4; i++) {
             state[i*PARTICLES_PER_BLOCK + threadIdx.x] = x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x];
@@ -855,7 +894,7 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
         check_has_left<coord>(has_left, state, derivs);
     } else {
         // Reject the step and try again with smaller dt
-        dt[threadIdx.x] = dt_new;
+        dt[threadIdx.x] = ((double)dir_d) * dt_new;   // NEW BY MARIA: added direction
     }
 }
 
@@ -939,8 +978,9 @@ __global__ void particle_trace_kernel(double* out, double* init_pos, double* qua
 
 
 template<RHS id, typename... Args>
+// NEW BY MARIA: added arg backward to this signature
 vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_range, py::array_t<double> x2_range, py::array_t<double> x3_range, 
-    py::array_t<double> loc_init, double m, double q, double vtotal, py::array_t<double> vtang, double tmax, double tol, int nparticles, Args... args){
+    py::array_t<double> loc_init, double m, double q, double vtotal, py::array_t<double> vtang, double tmax, double tol, int nparticles, bool backward=false, Args... args){
 
     //  read data in from python
     py::buffer_info loc_init_buf = loc_init.request();
@@ -990,6 +1030,10 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     gpuErrchk(cudaMemcpyToSymbol(rtol_d, &tol, sizeof(double)));
     gpuErrchk(cudaMemcpyToSymbol(v_total_d, &vtotal, sizeof(double)));
 
+    // NEW BY MARIA
+    int dir = backward ? -1 : 1;
+    gpuErrchk(cudaMemcpyToSymbol(dir_d, &dir, sizeof(int)));
+    //
 
     gpuErrchk(cudaMemcpyToSymbol(n_x2_d, &n_x2, sizeof(int)) );
     gpuErrchk(cudaMemcpyToSymbol(n_x3_d, &n_x3, sizeof(int)) );
@@ -1033,6 +1077,10 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     cudaEventCreate(&stop);
     cudaEventRecord(start);
     particle_trace_kernel<id><<<nblks, nthreads>>>(out_d, init_pos_d, quadpts_d, args...);
+    // NEW BY MARIA: added error checks
+    gpuErrchk(cudaPeekAtLastError());
+    gpuErrchk(cudaDeviceSynchronize());
+    //
 
     double out[5*nparticles];
     gpuErrchk(cudaMemcpy(out, out_d, 5 * nparticles * sizeof(double), cudaMemcpyDeviceToHost) );
@@ -1052,6 +1100,13 @@ extern "C" vector<double> cartesian_gpu_tracing(py::array_t<double> quad_pts, py
         py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
         double tmax, double tol, int nparticles){
             return gpu_tracing<RHS::GC_CartesianVacuum>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles);
+        }
+
+// NEW BY MARIA: cartesian backward entry point
+extern "C" vector<double> cartesian_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+        py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+        double tmax, double tol, int nparticles){
+            return gpu_tracing<RHS::GC_CartesianVacuum>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles, true);  // backward
         }
 
 
@@ -1079,6 +1134,45 @@ extern "C" vector<double> boozer_gpu_tracing(py::array_t<double> quad_pts, py::a
         results = gpu_tracing<RHS::GC_Boozer>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles);
     }
 
+    for(int i=0; i<nparticles; ++i){
+        double x1 = results[5*i+1];
+        double x2 = results[5*i+2];
+
+        results[5*i+1] = sqrt(x1*x1 + x2*x2);
+        results[5*i+2] = atan2(x2, x1);
+    }
+
+    return results;
+}
+
+
+// NEW BY MARIA: same as for forward tracing
+extern "C" vector<double> boozer_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+        py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+        double tmax, double tol, double psi0, int nparticles, bool vacuum=false){
+
+    // same preprocessing as forward
+    py::buffer_info stz_init_buf = stz_init.request();
+    double* stz_init_arr = static_cast<double*>(stz_init_buf.ptr);
+
+    for(int i=0; i<nparticles; ++i){
+        double s = stz_init_arr[3*i];
+        double theta = stz_init_arr[3*i+1];
+
+        stz_init_arr[3*i] = s*cos(theta);
+        stz_init_arr[3*i+1] = s*sin(theta);
+    }
+
+    gpuErrchk(cudaMemcpyToSymbol(psi0_d, &psi0, sizeof(double)));
+
+    std::vector<double> results;
+    if (vacuum) {
+        results = gpu_tracing<RHS::GC_BoozerVacuum>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles, true /* backward */);
+    } else {
+        results = gpu_tracing<RHS::GC_Boozer>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles, true /* backward */);
+    }
+
+    // same postprocessing as forward
     for(int i=0; i<nparticles; ++i){
         double x1 = results[5*i+1];
         double x2 = results[5*i+2];
