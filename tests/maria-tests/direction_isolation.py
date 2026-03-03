@@ -227,6 +227,39 @@ if np.median(after) > 100 * np.median(baseline) and np.median(after) > 1e-10 * s
                 "than the forward/forward baseline. This is consistent with a per-call "
                 "state (e.g., dir flag) not being reset.", flush=True)
 
+
+
+proc0_print("\n[A2] Backward equivalence test: backward(+v) == forward(-v)", flush=True)
+
+# forward with original vtang
+f_pos = run_cartesian(cartesian_gpu_tracing,
+                      cell_quad_pts, r_range, phi_range, z_range,
+                      stz_init, mass, charge, speed_total, vtang,
+                      test_tmax, tol, nparticles)
+
+# forward with flipped vtang
+f_neg = run_cartesian(cartesian_gpu_tracing,
+                      cell_quad_pts, r_range, phi_range, z_range,
+                      stz_init, mass, charge, speed_total, -vtang,
+                      test_tmax, tol, nparticles)
+
+# backward with original vtang
+b_pos = run_cartesian(cartesian_gpu_tracing_backward,
+                      cell_quad_pts, r_range, phi_range, z_range,
+                      stz_init, mass, charge, speed_total, vtang,
+                      test_tmax, tol, nparticles)
+
+# Compare xyz (cols 1:4) and vpar (col 4)
+d_xyz = np.linalg.norm(b_pos[:, 1:4] - f_neg[:, 1:4], axis=1)
+d_v   = np.abs(b_pos[:, 4] - f_neg[:, 4])
+
+proc0_print(f"median ||b_pos.xyz - f_neg.xyz|| = {np.median(d_xyz):.3e} m", flush=True)
+proc0_print(f"max    ||b_pos.xyz - f_neg.xyz|| = {np.max(d_xyz):.3e} m", flush=True)
+proc0_print(f"median |b_pos.vpar - f_neg.vpar| = {np.median(d_v):.3e} m/s", flush=True)
+proc0_print(f"max    |b_pos.vpar - f_neg.vpar| = {np.max(d_v):.3e} m/s", flush=True)
+
+
+
 # ----------------------------
 # Phase A.2: Closure test (forward then backward from the forward final state)
 #   forward:  (R,phi,Z, vtang) -> (x,y,z,vpar)
