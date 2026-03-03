@@ -19,6 +19,18 @@ extern "C" vector<double> boozer_gpu_tracing(py::array_t<double> quad_pts, py::a
     py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
     double tmax, double tol, double psi0, int nparticles, bool vacuum=false);
 
+
+// NEW BY MARIA
+extern "C" vector<double> cartesian_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+    py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+    double tmax, double tol, int nparticles);
+
+extern "C" vector<double> boozer_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+    py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+    double tmax, double tol, double psi0, int nparticles, bool vacuum);
+//
+
+
 extern "C" vector<double> boozer_saw_gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> srange, py::array_t<double> trange, py::array_t<double> zrange, 
         double saw_omega, py::array_t<double> saw_srange, py::array_t<int> saw_m, py::array_t<int> saw_n, py::array_t<double> saw_phihats, int saw_nharmonics,
         py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, double tmax, double tol, double psi0, int nparticles);
