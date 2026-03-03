@@ -182,7 +182,8 @@ stz_init[1::3] = wrap_phi(stz_init[1::3], phi_min, phi_max)
 # ----------------------------
 # Choose test tmax
 # ----------------------------
-test_tmax = float(tmax_values[len(tmax_values)//2])  # mid value
+#test_tmax = float(tmax_values[len(tmax_values)//2])  # mid value
+test_tmax = 1e-7
 proc0_print(f"\nPhase A tests with tmax={test_tmax:.2e}s", flush=True)
 
 # ----------------------------
