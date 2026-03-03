@@ -11,7 +11,7 @@ from simsopt.util.constants import PROTON_MASS, ELEMENTARY_CHARGE, ONE_EV
 from simsopt.field.sampling import draw_uniform_on_curve
 
 from firm3d.util.gpu_utils import cartesian_interpolant
-from firm3dpp import cartesian_gpu_tracing
+from firm3dpp import cartesian_gpu_tracing, cartesian_gpu_tracing_backward
 
 
 # helper
