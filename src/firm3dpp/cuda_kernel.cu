@@ -868,8 +868,8 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
         exponent = -1.0/5.0;
     }
     dt_new *= pow(max_err, exponent);
-    dt_new = fmax(dt_new, 0.2 * dt[threadIdx.x]);
-    dt_new = fmin(dt_new, 5.0 * dt[threadIdx.x]);   
+    dt_new = fmax(dt_new, 0.2 * dt_mag); // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
+    dt_new = fmin(dt_new, 5.0 * dt_mag);  // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
 
     if(max_err <= 1.0) {
         // if the error is moderate, don't use a new step size

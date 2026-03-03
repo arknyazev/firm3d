@@ -14,24 +14,6 @@ from firm3d.util.gpu_utils import cartesian_interpolant
 from firm3dpp import cartesian_gpu_tracing, cartesian_gpu_tracing_backward
 
 
-# helper
-def run_cartesian(tracer, cell_quad_pts, r_range, phi_range, z_range,
-                  stz_init, mass, charge, speed_total, vtang, tmax, tol, nparticles):
-    results = tracer(
-        cell_quad_pts,
-        np.array(r_range, dtype=np.float64),
-        np.array(phi_range, dtype=np.float64),
-        np.array(z_range, dtype=np.float64),
-        stz_init,
-        mass,
-        charge,
-        speed_total,
-        vtang,
-        tmax,
-        tol,
-        nparticles
-    )
-    return np.asarray(results, dtype=np.float64).reshape(nparticles, 5)
 
 # copied from alex's example (tracing_gpu_ncsx.py)
 # ── Parameters ──────────────────────────────────────────────────────────
@@ -142,69 +124,156 @@ np.save(out_dir + "particles_initial_vtang.npy", vtang)
 proc0_print(f"Saved {nparticles} initial particle positions to {out_dir}")
 
 
-# direction test: forward -> backward -> forward
+# TESTS
+
+def run_cartesian(tracer, cell_quad_pts, r_range, phi_range, z_range,
+                  stz_init, mass, charge, speed_total, vtang, tmax, tol, nparticles):
+    results = tracer(
+        cell_quad_pts,
+        np.array(r_range, dtype=np.float64),
+        np.array(phi_range, dtype=np.float64),
+        np.array(z_range, dtype=np.float64),
+        np.asarray(stz_init, dtype=np.float64),
+        float(mass),
+        float(charge),
+        float(speed_total),
+        np.asarray(vtang, dtype=np.float64),
+        float(tmax),
+        float(tol),
+        int(nparticles),
+    )
+    return np.asarray(results, dtype=np.float64).reshape(int(nparticles), 5)
+
+def wrap_phi(phi, phi_min, phi_max):
+    """
+    Wrap phi into [phi_min, phi_max).
+    This makes the cylindrical init consistent with the interpolant domain.
+    """
+    period = phi_max - phi_min
+    return (phi - phi_min) % period + phi_min
+
+def xyz_to_stz_flat(xyz, phi_min, phi_max):
+    """
+    Convert Nx3 XYZ -> flattened cylindrical [R0,phi0,Z0, R1,phi1,Z1, ...]
+    with phi wrapped into [phi_min, phi_max).
+    """
+    x = xyz[:, 0]
+    y = xyz[:, 1]
+    z = xyz[:, 2]
+    R = np.sqrt(x*x + y*y)
+    phi = np.arctan2(y, x)
+    phi = wrap_phi(phi, phi_min, phi_max)
+
+    stz = np.empty(3 * xyz.shape[0], dtype=np.float64)
+    stz[0::3] = R
+    stz[1::3] = phi
+    stz[2::3] = z
+    return stz
+
+# ----------------------------
+# Phase A.0: Make initial phi consistent with phi_range
+# ----------------------------
+phi_min = float(phi_range[0])
+phi_max = float(phi_range[1])
+
+stz_init = np.asarray(stz_init, dtype=np.float64).copy()
+stz_init[1::3] = wrap_phi(stz_init[1::3], phi_min, phi_max)
+
+# ----------------------------
+# Choose test tmax
+# ----------------------------
 test_tmax = float(tmax_values[len(tmax_values)//2])  # mid value
-proc0_print(f"\nPhase A direction test with tmax={test_tmax:.2e}s", flush=True)
+proc0_print(f"\nPhase A tests with tmax={test_tmax:.2e}s", flush=True)
 
-out_f1 = run_cartesian(cartesian_gpu_tracing,
-                       cell_quad_pts, r_range, phi_range, z_range,
-                       stz_init, mass, charge, speed_total, vtang,
-                       test_tmax, tol, nparticles)
+# ----------------------------
+# Phase A.1: Direction-flag contamination test
+#   Baseline: forward then forward again (no backward call between)
+#   Probe:    forward -> backward -> forward, compare forward outputs
+# ----------------------------
+proc0_print("\n[A1] Direction-flag contamination test", flush=True)
 
-out_b  = run_cartesian(cartesian_gpu_tracing_backward,
-                       cell_quad_pts, r_range, phi_range, z_range,
-                       stz_init, mass, charge, speed_total, vtang,
-                       test_tmax, tol, nparticles)
+f0 = run_cartesian(cartesian_gpu_tracing,
+                   cell_quad_pts, r_range, phi_range, z_range,
+                   stz_init, mass, charge, speed_total, vtang,
+                   test_tmax, tol, nparticles)
 
-out_f2 = run_cartesian(cartesian_gpu_tracing,
-                       cell_quad_pts, r_range, phi_range, z_range,
-                       stz_init, mass, charge, speed_total, vtang,
-                       test_tmax, tol, nparticles)
+f1 = run_cartesian(cartesian_gpu_tracing,
+                   cell_quad_pts, r_range, phi_range, z_range,
+                   stz_init, mass, charge, speed_total, vtang,
+                   test_tmax, tol, nparticles)
 
-# Compare xyz+vpar only (ignore time column 0)
-diff_f  = np.linalg.norm(out_f2[:, 1:] - out_f1[:, 1:], axis=1)
-diff_fb = np.linalg.norm(out_f2[:, 1:] - out_b[:, 1:], axis=1)
+baseline = np.linalg.norm(f1[:, 1:] - f0[:, 1:], axis=1)  # compare xyz+vpar
 
-proc0_print(f"median ||f2-f1|| = {np.median(diff_f):.3e}", flush=True)
-proc0_print(f"median ||f2-b || = {np.median(diff_fb):.3e}", flush=True)
+b  = run_cartesian(cartesian_gpu_tracing_backward,
+                   cell_quad_pts, r_range, phi_range, z_range,
+                   stz_init, mass, charge, speed_total, vtang,
+                   test_tmax, tol, nparticles)
 
-if not (np.median(diff_f) < 1e-6 * (1.0 + np.median(np.linalg.norm(out_f1[:,1:], axis=1)))):
-    proc0_print("WARNING: forward results changed a lot after backward call. "
-                "This often means dir_d was not reset per-call.", flush=True)
-    
+f2 = run_cartesian(cartesian_gpu_tracing,
+                   cell_quad_pts, r_range, phi_range, z_range,
+                   stz_init, mass, charge, speed_total, vtang,
+                   test_tmax, tol, nparticles)
 
-# closure test: x0 -> forward -> x1 -> backward -> x0' ────────
-# Use only particles that were not lost in forward run for the comparison.
-proc0_print("\nPhase A closure test (forward then backward)", flush=True)
+after = np.linalg.norm(f2[:, 1:] - f1[:, 1:], axis=1)
 
-# forward from initial
-fwd = out_f1
-t_f = fwd[:, 0]
-lost_mask = t_f < 0.99 * test_tmax
-keep = ~lost_mask
+proc0_print(f"median baseline ||f1-f0|| = {np.median(baseline):.3e}", flush=True)
+proc0_print(f"median after    ||f2-f1|| = {np.median(after):.3e}", flush=True)
 
-proc0_print(f"Not-lost particles for closure: {np.sum(keep)}/{nparticles}", flush=True)
+# A simple, scale-aware trigger:
+scale = 1.0 + np.median(np.linalg.norm(f1[:, 1:], axis=1))
+if np.median(after) > 100 * np.median(baseline) and np.median(after) > 1e-10 * scale:
+    proc0_print("WARNING: forward results changed much more after backward call "
+                "than the forward/forward baseline. This is consistent with a per-call "
+                "state (e.g., dir flag) not being reset.", flush=True)
 
-if np.sum(keep) > 0:
-    # backward start = final xyz, and vpar_final becomes new vtang
-    stz_b_init = fwd[keep, 1:4].astype(np.float64).ravel()
-    vtang_b = fwd[keep, 4].astype(np.float64)
-    n_keep = int(np.sum(keep))
+# ----------------------------
+# Phase A.2: Closure test (forward then backward from the forward final state)
+#   forward:  (R,phi,Z, vtang) -> (x,y,z,vpar)
+#   backward: start from (x,y,z) converted to (R,phi,Z), with vtang := vpar_final
+# ----------------------------
+proc0_print("\n[A2] Closure test: x0 -> forward -> x1 -> backward -> x0'", flush=True)
 
-    bwd_from_fwd = run_cartesian(cartesian_gpu_tracing_backward,
-                                 cell_quad_pts, r_range, phi_range, z_range,
-                                 stz_b_init, mass, charge, speed_total, vtang_b,
-                                 test_tmax, tol, n_keep)
+fwd = f1
+t_final = fwd[:, 0]
+lost = t_final < 0.99 * test_tmax
+keep = ~lost
+n_keep = int(np.sum(keep))
 
-    # original xyz for those particles
-    # stz_init is cylindrical in your script; but kernel output is xyz.
-    # We saved xyz_init earlier; use it:
-    xyz0 = xyz_init[keep, :].astype(np.float64)
+proc0_print(f"Not-lost particles: {n_keep}/{nparticles}", flush=True)
 
-    xyz_back = bwd_from_fwd[:, 1:4]
+if n_keep == 0:
+    proc0_print("All particles lost in forward run; closure test skipped.", flush=True)
+else:
+    xyz1 = fwd[keep, 1:4]                # final xyz from forward
+    vpar1 = fwd[keep, 4].astype(np.float64)  # final v_par from forward
+
+    # Convert xyz1 -> cylindrical init for backward, consistent with interpolant phi range
+    stz_b_init = xyz_to_stz_flat(xyz1, phi_min, phi_max)
+
+    # Backward "vtang" should be the forward final v_par (per your intention)
+    # (If closure is bad even after coordinate fixes, try vtang_b = -vpar1 as a diagnostic.)
+    vtang_b = vpar1
+
+    bwd = run_cartesian(cartesian_gpu_tracing_backward,
+                        cell_quad_pts, r_range, phi_range, z_range,
+                        stz_b_init, mass, charge, speed_total, vtang_b,
+                        test_tmax, tol, n_keep)
+
+    xyz_back = bwd[:, 1:4]
+
+    vpar_back = bwd[:, 4]
+    # Compare to original vtang for those particles (sign may depend on convention)
+    v0 = vtang[keep].astype(np.float64)
+
+    dv_same = np.abs(vpar_back - v0)
+    dv_flip = np.abs(vpar_back + v0)
+
+    proc0_print(f"median |vpar_back - v0|      = {np.median(dv_same):.3e} m/s", flush=True)
+    proc0_print(f"median |vpar_back + v0|      = {np.median(dv_flip):.3e} m/s", flush=True)
+
+    # Compare against original xyz_init for the kept particles
+    xyz0 = np.asarray(xyz_init, dtype=np.float64)[keep, :]
     err = np.linalg.norm(xyz_back - xyz0, axis=1)
 
-    proc0_print(f"median closure ||x_back - x0|| = {np.median(err):.3e} m", flush=True)
-    proc0_print(f"max    closure ||x_back - x0|| = {np.max(err):.3e} m", flush=True)
-else:
-    proc0_print("All particles were lost in forward run; closure test skipped.", flush=True)
+    proc0_print(f"median closure ||x0'-x0|| = {np.median(err):.3e} m", flush=True)
+    proc0_print(f"max    closure ||x0'-x0|| = {np.max(err):.3e} m", flush=True)
