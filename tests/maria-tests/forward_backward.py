@@ -223,7 +223,7 @@ for tol in tol_vals:
         bwd_from_fwd = run_cartesian(cartesian_gpu_tracing_backward,
                                     cell_quad_pts, r_range, phi_range, z_range,
                                     stz_b_init, mass, charge, speed_total, vtang_b,
-                                    test_tmax, tol=tol, n_keep)
+                                    test_tmax, n_keep, tol=tol)
 
         xyz0 = xyz_init[keep, :].astype(np.float64)       # original xyz
         xyz_back = bwd_from_fwd[:, 1:4]                   # returned xyz
