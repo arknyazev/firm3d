@@ -19,7 +19,7 @@ from firm3dpp import cartesian_gpu_tracing, cartesian_gpu_tracing_backward
 # ── Parameters ──────────────────────────────────────────────────────────
 
 # Particle parameters:
-nparticles = 16 # number of particles to trace
+nparticles = 1 # number of particles to trace
 energy = 500 * ONE_EV # kinetic energy of particles [J]
 mass = PROTON_MASS  # mass of particles [kg]
 charge = ELEMENTARY_CHARGE # charge of particles [C]
@@ -28,12 +28,12 @@ tmax_values = np.arange(1e-7, 1e-4 + 1e-7, 1e-7) # trajectory snapshots [s]
 
 seed = 1 # random seed for initial conditions
 
-tol = 1e-9 # ODE solver tolerance
+tol_vals = [1e-9, 1e-10, 1e-11] # ODE solver tolerance
 
 degree = 3 # degree of interpolation for the InterpolatedField
 # (for Maria: can this only be 3 for GPU interpolant?)
 
-n = 16 # number of interpolation cells per direction
+n = 1 # number of interpolation cells per direction
 
 # Directory for output
 out_dir = "./output/"
@@ -184,14 +184,15 @@ stz_init[1::3] = wrap_phi(stz_init[1::3], phi_min, phi_max)
 # Choose test tmax
 # ----------------------------
 #test_tmax = float(tmax_values[len(tmax_values)//2])  # mid value
-tmax_values = [1e-7, 2e-7, 4e-7, 8e-7]
-for test_tmax in tmax_values:
-    proc0_print(f"\nPhase A tests with tmax={test_tmax:.2e}s", flush=True)
+#tmax_values = [1e-7, 2e-7, 4e-7, 8e-7]
+test_tmax = 1e-7
+for tol in tol_vals:
+    proc0_print(f"\nPhase A tests with tol={tol:.2e}s", flush=True)
 
     f1 = run_cartesian(cartesian_gpu_tracing,
                    cell_quad_pts, r_range, phi_range, z_range,
                    stz_init, mass, charge, speed_total, vtang,
-                   test_tmax, tol, nparticles)
+                   test_tmax, tol=tol, nparticles=1)
     
     # ----------------------------
     # Phase A.2: Closure test (forward then backward from the forward final state)
@@ -222,7 +223,7 @@ for test_tmax in tmax_values:
         bwd_from_fwd = run_cartesian(cartesian_gpu_tracing_backward,
                                     cell_quad_pts, r_range, phi_range, z_range,
                                     stz_b_init, mass, charge, speed_total, vtang_b,
-                                    test_tmax, tol, n_keep)
+                                    test_tmax, tol=tol, n_keep)
 
         xyz0 = xyz_init[keep, :].astype(np.float64)       # original xyz
         xyz_back = bwd_from_fwd[:, 1:4]                   # returned xyz
@@ -234,8 +235,8 @@ for test_tmax in tmax_values:
         dv_same = np.abs(vpar_back - v0)
         dv_flip = np.abs(vpar_back + v0)
 
-        proc0_print(f"median |vpar_back - v0|      = {np.median(dv_same):.3e} m/s", flush=True)
-        proc0_print(f"median |vpar_back + v0|      = {np.median(dv_flip):.3e} m/s", flush=True)
+        #proc0_print(f"median |vpar_back - v0|      = {np.median(dv_same):.3e} m/s", flush=True)
+        #proc0_print(f"median |vpar_back + v0|      = {np.median(dv_flip):.3e} m/s", flush=True)
 
 
         err = np.linalg.norm(xyz_back - xyz0, axis=1)
