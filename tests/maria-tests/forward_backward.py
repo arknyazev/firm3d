@@ -1,5 +1,7 @@
 import time
 import os
+from pathlib import Path
+from datetime import datetime
 from math import sqrt
 import numpy as np
 
@@ -37,10 +39,18 @@ degree = 3 # degree of interpolation for the InterpolatedField
 n = 16 # number of interpolation cells per direction
 
 # Directory for output
-script_dir = os.path.dirname(os.path.abspath(__file__))
-out_dir = os.path.join(script_dir, "outputs")
+# directory of the script
+script_dir = Path(__file__).resolve().parent
 
-os.makedirs(out_dir, exist_ok=True)
+# timestamp
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+# output directory
+out_dir = script_dir / "outputs" / timestamp
+out_dir.mkdir(parents=True, exist_ok=True)
+
+print("Saving outputs to:", out_dir)
+
 
 # ── 1. Magnetic field configuration ─────────────────────────────────────
 base_curves, base_currents, ma, nfp, bs = get_data("ncsx")
