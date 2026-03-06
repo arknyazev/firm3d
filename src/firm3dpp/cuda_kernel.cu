@@ -1045,8 +1045,8 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     for(int i=0; i<nparticles; ++i){
         int start = 3*i;
 
-        //double s = loc_init_arr[start];
-        //double theta = loc_init_arr[start+1];
+        double s = loc_init_arr[start];
+        double theta = loc_init_arr[start+1];
 
         // NEW BY MARIA: COORDINATE CONVENTION
         double r   = loc_init_arr[start];
