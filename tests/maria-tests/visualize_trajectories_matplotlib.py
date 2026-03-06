@@ -48,11 +48,6 @@ output_root.mkdir(parents=True, exist_ok=True)
 
 dpi = 300
 
-tol_dir = sys.argv[1] if len(sys.argv) >= 2 else None
-which = sys.argv[2].lower() if len(sys.argv) >= 3 else "both"
-if which not in ("forward", "backward", "both"):
-    raise ValueError('which must be "forward", "backward", or "both"')
-
 runs = []
 if which in ("forward", "both"):
     runs.append("forward")
