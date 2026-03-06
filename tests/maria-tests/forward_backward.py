@@ -37,7 +37,9 @@ degree = 3 # degree of interpolation for the InterpolatedField
 n = 16 # number of interpolation cells per direction
 
 # Directory for output
-out_dir = "./output/"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+out_dir = os.path.join(script_dir, "outputs")
+
 os.makedirs(out_dir, exist_ok=True)
 
 # ── 1. Magnetic field configuration ─────────────────────────────────────
