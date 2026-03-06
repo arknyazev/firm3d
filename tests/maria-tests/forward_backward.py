@@ -24,7 +24,7 @@ energy = 500 * ONE_EV # kinetic energy of particles [J]
 mass = PROTON_MASS  # mass of particles [kg]
 charge = ELEMENTARY_CHARGE # charge of particles [C]
 
-tmax_values = np.arange(1e-7, 1e-4 + 1e-7, 1e-7) # trajectory snapshots [s]
+tmax_values = np.arange(1e-7, 1e-5 + 1e-7, 1e-7) # trajectory snapshots [s]
 tmax_max = float(np.max(tmax_values))
 
 seed = 1 # random seed for initial conditions
