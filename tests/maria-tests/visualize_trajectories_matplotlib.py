@@ -6,14 +6,15 @@ Reads GPU tracing output from ./output/tol_*/{forward,backward}/
 and produces overhead (X-Y), poloidal (R-Z), and 3D trajectory plots.
 
 Usage examples:
-  python visualize_trajectories_matplotlib.py
-  python visualize_trajectories_matplotlib.py tol_1p00em09
-  python visualize_trajectories_matplotlib.py tol_1p00em09 both
-  python visualize_trajectories_matplotlib.py tol_1p00em09 forward
+  python visualize_trajectories_matplotlib.py run_2026-03-06_15-30
+  python visualize_trajectories_matplotlib.py run_2026-03-06_15-30 tol_1p00em09
+  python visualize_trajectories_matplotlib.py run_2026-03-06_15-30 tol_1p00em09 both
+  python visualize_trajectories_matplotlib.py run_2026-03-06_15-30 tol_1p00em09 forward
 """
 
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -26,8 +27,25 @@ from trajectory_utils import (
     truncate_lost_trajectories,
 )
 
+
 # ── Parameters ───────────────────────────────────────────────────────────
-output_root = "./output"
+script_dir = Path(__file__).resolve().parent
+
+if len(sys.argv) < 2:
+    raise ValueError(
+        'Usage: python visualize_trajectories_matplotlib.py <run_name> [tol_dir] [forward|backward|both]'
+    )
+
+run_name = sys.argv[1]
+tol_dir = sys.argv[2] if len(sys.argv) >= 3 else None
+which = sys.argv[3].lower() if len(sys.argv) >= 4 else "both"
+
+if which not in ("forward", "backward", "both"):
+    raise ValueError('which must be "forward", "backward", or "both"')
+
+output_root = script_dir / "output" / run_name
+output_root.mkdir(parents=True, exist_ok=True)
+
 dpi = 300
 
 tol_dir = sys.argv[1] if len(sys.argv) >= 2 else None
@@ -43,7 +61,7 @@ if which in ("backward", "both"):
 
 # ── Load initial positions (from tol folder) ─────────────────────────────
 try:
-    initial_xyz = load_initial_positions(output_root=output_root, tol_dir=tol_dir)
+    initial_xyz = load_initial_positions(output_root=str(output_root), tol_dir=tol_dir)
 except FileNotFoundError:
     print("Warning: initial positions file not found in tol folder, skipping markers")
     initial_xyz = None
@@ -55,7 +73,7 @@ tol_dir_full_ref = None
 
 for run_subdir in runs:
     trajectories, tmax_values, lost_mask, final_times, run_dir, tol_dir_full = load_all_trajectories(
-        output_root=output_root,
+        output_root=str(output_root),
         tol_dir=tol_dir,
         run_subdir=run_subdir,
     )
