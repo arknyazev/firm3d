@@ -1068,7 +1068,7 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     //    
         //for(int j=0; j<3; j++){
         //    init_pos[4*i + j] = loc_init_arr[start + j];
-        }
+        //}
         //init_pos[4*i + 3] = vtang_arr[i];
     //}
    
