@@ -1045,14 +1045,32 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     for(int i=0; i<nparticles; ++i){
         int start = 3*i;
 
-        double s = loc_init_arr[start];
-        double theta = loc_init_arr[start+1];
+        //double s = loc_init_arr[start];
+        //double theta = loc_init_arr[start+1];
+
+        // NEW BY MARIA: COORDINATE CONVENTION
+        double r   = loc_init_arr[start];
+        double phi = loc_init_arr[start + 1];
+        double z   = loc_init_arr[start + 2];
         
-        for(int j=0; j<3; j++){
-            init_pos[4*i + j] = loc_init_arr[start + j];
+        if constexpr (map_rhs_to_coord<id>() == CoordSys::Cartesian) {
+            init_pos[4*i + 0] = r * cos(phi);
+            init_pos[4*i + 1] = r * sin(phi);
+            init_pos[4*i + 2] = z;
+        } else {
+            init_pos[4*i + 0] = loc_init_arr[start + 0];
+            init_pos[4*i + 1] = loc_init_arr[start + 1];
+            init_pos[4*i + 2] = loc_init_arr[start + 2];
         }
+        
         init_pos[4*i + 3] = vtang_arr[i];
     }
+    //    
+        //for(int j=0; j<3; j++){
+        //    init_pos[4*i + j] = loc_init_arr[start + j];
+        }
+        //init_pos[4*i + 3] = vtang_arr[i];
+    //}
    
     double* init_pos_d;
     gpuErrchk(cudaMalloc((void**)&init_pos_d, 4 * nparticles * sizeof(double)) );

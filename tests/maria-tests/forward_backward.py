@@ -230,6 +230,10 @@ phi_max = float(phi_range[1])
 stz_init = np.asarray(stz_init, dtype=np.float64).copy()
 stz_init[1::3] = wrap_phi(stz_init[1::3], phi_min, phi_max)
 
+# will track where the last point where the forward particle is not lost is
+last_alive_fwd = None
+last_alive_tmax = None
+
 # TEST
 for tol in tol_vals:
     proc0_print(f"\n=== tol={tol:.2e} ===", flush=True)
