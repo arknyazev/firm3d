@@ -2459,8 +2459,8 @@ py::array_t<double> test_gpu_derivatives(py::array_t<double> quad_pts, py::array
     gpuErrchk( cudaMemcpy(&out, out_d, 4*n_points * sizeof(double), cudaMemcpyDeviceToHost) );
     auto result = py::array_t<double>(4*n_points, out);
 
-    // NEW BY MARIA
-    bool is_test = false;
+    // NEW BY MARIA: reset var
+    is_test = false;
     gpuErrchk(cudaMemcpyToSymbol(is_test_d, &is_test, sizeof(bool)));
     
     gpuErrchk( cudaFree(quadpts_d) );
@@ -2785,6 +2785,7 @@ extern "C" vector<double> test_timestep_cartesian(py::array_t<double> quad_pts, 
         quad_pts, x1_range, x2_range, x3_range, loc_init, m, q, vtotal, vtang, tol, nparticles
     );
 
+    //
     rescale_abstol_var = true;
     gpuErrchk(cudaMemcpyToSymbol(rescale_abstol_var_d, &rescale_abstol_var, sizeof(bool)) );
 
