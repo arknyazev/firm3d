@@ -865,7 +865,7 @@ __device__ void build_state_cartesian_drag(
 
     constexpr double step_dir = drag_step_dir<id>();
 
-    // Keep t[] as elapsed time >= 0 for control flow, but build physical time with sign.
+    // keeping t[] as elapsed time >= 0 for control flow, but build physical time with sign
     double dt_signed = dt[threadIdx.x];
     double t_phys = step_dir * t[threadIdx.x];
 
@@ -983,7 +983,7 @@ __device__ void setup_particle(double* mu, double* t, double* dt, double* dtmax,
         dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
 
         //dt[threadIdx.x] = 1e-3*dtmax[threadIdx.x];
-        // NEW BY MARIA (instead of line above)
+        // NEW BY MARIA (instead of line above) - need to take sign of time into account
         dt[threadIdx.x] = ((double)dir_d) * (1e-3 * dtmax[threadIdx.x]);
     }
 }
@@ -1008,10 +1008,6 @@ __device__ void setup_particle_cartesian_drag(
     double* derivs,
     int nparticles_blk
 ){
-    static_assert(
-        id == RHS::GC_CartesianDragForward || id == RHS::GC_CartesianDragBackward,
-        "setup_particle_cartesian_drag only supports drag Cartesian RHS"
-    );
 
     constexpr double step_dir = drag_step_dir<id>();
 
@@ -1058,7 +1054,8 @@ __device__ void setup_particle_cartesian_drag(
         calc_max_timestep_size<CoordSys::Cartesian>(dtmax, x_temp, derivs);
         dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
 
-        // Signed timestep: positive for forward drag, negative for backward drag.
+        // Signed timestep: positive for forward drag, negative for backward drag
+        // same logic as vacuum case
         dt[threadIdx.x] = step_dir * (1e-3 * dtmax[threadIdx.x]);
     }
 }
@@ -1113,7 +1110,7 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
         double state_i = state[i*PARTICLES_PER_BLOCK + threadIdx.x];
         double deriv_i = derivs[(6*0 + i)*PARTICLES_PER_BLOCK + threadIdx.x];
         //err_elt = dt[threadIdx.x]*(bhat1 * deriv_i
-        // NEW BY MARIA (instead of line above)
+        // NEW BY MARIA (instead of line above): time sign
         err_elt = dt_mag * (bhat1 * deriv_i
         //
                                  + bhat3 * derivs[(6*2 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
@@ -1123,7 +1120,7 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
                                  + bhat7 * derivs[(6*6 + i)*PARTICLES_PER_BLOCK + threadIdx.x]);
         double atol_i = (rescale_abstol_var_d) && (i == 3) ?  atol_d * v_total_d : atol_d;
         //err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt[threadIdx.x]*fabs(deriv_i)));
-        // NEW BY MARIA (instead of line above)
+        // NEW BY MARIA (instead of line above) : time sign
         err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt_mag * fabs(deriv_i)));
         //
         max_err = fmax(max_err, err_elt);
@@ -1131,7 +1128,7 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
 
     // Compute new step size
     //double dt_new = dt[threadIdx.x]*0.9;
-    // NEW BY MARIA (instead of line above)
+    // NEW BY MARIA (instead of line above) : time sign
     double dt_new = dt_mag * 0.9;
     //
     double exponent = 0.0;
@@ -1186,10 +1183,6 @@ __device__ void adjust_time_cartesian_drag(
     int* stop_reason,
     double* dtmax
 ){
-    static_assert(
-        id == RHS::GC_CartesianDragForward || id == RHS::GC_CartesianDragBackward,
-        "adjust_time_cartesian_drag only supports drag Cartesian RHS"
-    );
 
     constexpr double step_dir = drag_step_dir<id>();
 
@@ -1252,10 +1245,10 @@ __device__ void adjust_time_cartesian_drag(
             dt_new = dt_mag;
         }
 
-        // Advance elapsed time with positive magnitude.
+        // Advance elapsed time with positive magnitude
         t[threadIdx.x] += dt_mag;
 
-        // Remaining elapsed time before reaching tmax_d.
+        // Remaining elapsed time before reaching tmax_d
         double remaining = tmax_d - t[threadIdx.x];
         double next_mag = fmin(dt_new, remaining);
         dt[threadIdx.x] = step_dir * next_mag;
@@ -1274,7 +1267,7 @@ __device__ void adjust_time_cartesian_drag(
             return;
         }
 
-        // stop condition 2: energy threshold
+        // stop condition 2: energy threshold (H)
         if(use_energy_stop_d){
             double H_now = state[4 * PARTICLES_PER_BLOCK + threadIdx.x];
 
@@ -1297,7 +1290,7 @@ __device__ void adjust_time_cartesian_drag(
             stop_reason[threadIdx.x] = 0; // reached tmax
         }
     } else {
-        // Reject step: keep the sign, only reduce the magnitude.
+        // Reject step: keep the sign, only reduce the magnitude
         dt[threadIdx.x] = step_dir * dt_new;
     }
 }
@@ -1388,10 +1381,6 @@ __global__ void particle_trace_kernel_cartesian_drag(
     double* init_pos,
     double* quadpts_arr
 ){
-    static_assert(
-        id == RHS::GC_CartesianDragForward || id == RHS::GC_CartesianDragBackward,
-        "particle_trace_kernel_cartesian_drag only supports drag Cartesian RHS"
-    );
 
     int idx = threadIdx.x + blockIdx.x * PARTICLES_PER_BLOCK;
 
@@ -1673,10 +1662,6 @@ vector<double> gpu_tracing_cartesian_drag(
     double H_stop = 0.0,
     bool use_energy_stop = false
 ){
-    static_assert(
-        id == RHS::GC_CartesianDragForward || id == RHS::GC_CartesianDragBackward,
-        "gpu_tracing_cartesian_drag only supports drag Cartesian RHS"
-    );
 
     py::buffer_info loc_init_buf = loc_init.request();
     double* loc_init_arr = static_cast<double*>(loc_init_buf.ptr);
@@ -2459,7 +2444,7 @@ py::array_t<double> test_gpu_derivatives(py::array_t<double> quad_pts, py::array
     gpuErrchk( cudaMemcpy(&out, out_d, 4*n_points * sizeof(double), cudaMemcpyDeviceToHost) );
     auto result = py::array_t<double>(4*n_points, out);
 
-    // NEW BY MARIA: reset var
+    // NEW BY MARIA: reset var is_test
     is_test = false;
     gpuErrchk(cudaMemcpyToSymbol(is_test_d, &is_test, sizeof(bool)));
     
