@@ -426,6 +426,13 @@ for tol in tol_vals:
         save_csv_row(summary_csv, row)
 
         assert ok_t, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] t_final mismatch"
+        if not ok_xyz:
+            proc0_print(
+                f"[DEBUG XYZ] tol={tol:.2e}, tmax={tmax:.2e}, "
+                f"max_abs_xyz_diff={max_abs_xyz:.6e}, max_rel_xyz_diff={max_rel_xyz:.6e}, "
+                f"max_abs_xyz={np.max(np.abs(xyz_vac)):.6e}",
+                flush=True,
+            )
         assert ok_xyz, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] xyz mismatch"
         assert ok_v, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] vpar mismatch"
         assert ok_H, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] H is not constant when nu_s=0"
@@ -554,14 +561,14 @@ for tol in tol_vals:
         save_csv_row(summary_csv, row)
 
         assert ok_t, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] t_final mismatch"
-        assert ok_xyz, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] xyz mismatch"
-        if not ok_v:
+        if not ok_xyz:
             proc0_print(
-                f"[DEBUG VPAR] tol={tol:.2e}, tmax={tmax:.2e}, "
-                f"max_abs_vpar_diff={max_abs_v:.6e}, max_rel_vpar_diff={max_rel_v:.6e}, "
-                f"max_abs_vpar={np.max(np.abs(vpar_vac)):.6e}",
+                f"[DEBUG XYZ] tol={tol:.2e}, tmax={tmax:.2e}, "
+                f"max_abs_xyz_diff={max_abs_xyz:.6e}, max_rel_xyz_diff={max_rel_xyz:.6e}, "
+                f"max_abs_xyz={np.max(np.abs(xyz_vac)):.6e}",
                 flush=True,
             )
+        assert ok_xyz, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] xyz mismatch"
         assert ok_v, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] vpar mismatch"
         assert ok_H, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] H is not constant when nu_s=0"
         assert no_energy_stops, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] unexpected energy stop with use_energy_stop=False"
