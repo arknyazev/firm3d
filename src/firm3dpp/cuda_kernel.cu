@@ -258,9 +258,6 @@ __device__ void calc_derivs_cartesian_drag(
         "calc_derivs_cartesian_drag only supports drag Cartesian RHS"
     );
 
-    constexpr double drag_dir =
-        (id == RHS::GC_CartesianDragForward) ? 1.0 : -1.0;
-
     __shared__ double block_interpolants[7 * PARTICLES_PER_BLOCK];
 
     __syncthreads();
@@ -323,8 +320,8 @@ __device__ void calc_derivs_cartesian_drag(
 
         double bhat_dot_gradB = (B_x * GradAbsB_x + B_y * GradAbsB_y + B_z * GradAbsB_z) / AbsB;
 
-        double dvpar_drag = -0.5 * drag_dir * nu_s_d * v_par;
-        double dHdt       = -drag_dir * nu_s_d * H;
+        double dvpar_drag = -0.5 * nu_s_d * v_par;
+        double dHdt       = - nu_s_d * H;
 
         derivs[(7 * deriv_id + 0) * PARTICLES_PER_BLOCK + threadIdx.x] = fak1 * B_x + fak2 * BcrossGradAbsB_x;
         derivs[(7 * deriv_id + 1) * PARTICLES_PER_BLOCK + threadIdx.x] = fak1 * B_y + fak2 * BcrossGradAbsB_y;
@@ -2461,6 +2458,10 @@ py::array_t<double> test_gpu_derivatives(py::array_t<double> quad_pts, py::array
     double out[4*n_points];
     gpuErrchk( cudaMemcpy(&out, out_d, 4*n_points * sizeof(double), cudaMemcpyDeviceToHost) );
     auto result = py::array_t<double>(4*n_points, out);
+
+    // NEW BY MARIA
+    bool is_test = false;
+    gpuErrchk(cudaMemcpyToSymbol(is_test_d, &is_test, sizeof(bool)));
     
     gpuErrchk( cudaFree(quadpts_d) );
     gpuErrchk( cudaFree(loc_d) );
@@ -2469,6 +2470,7 @@ py::array_t<double> test_gpu_derivatives(py::array_t<double> quad_pts, py::array
     gpuErrchk( cudaFree(out_d) );
 
     return result;
+
 }
 
 
@@ -2772,12 +2774,21 @@ vector<double> test_gpu_timestep(py::array_t<double> quad_pts, py::array_t<doubl
     return particle_output;
 }
 
+// NEW BY MARIA: changed st rescale_abstol_var is reset to true
 extern "C" vector<double> test_timestep_cartesian(py::array_t<double> quad_pts, py::array_t<double> x1_range,
         py::array_t<double> x2_range, py::array_t<double> x3_range, py::array_t<double> loc_init, double m, double q, double vtotal, py::array_t<double> vtang, 
         double tol, int nparticles){
     bool rescale_abstol_var = false;
     gpuErrchk(cudaMemcpyToSymbol(rescale_abstol_var_d, &rescale_abstol_var, sizeof(bool)) );
-    return test_gpu_timestep<RHS::GC_CartesianVacuum>(quad_pts, x1_range, x2_range, x3_range, loc_init, m, q, vtotal, vtang, tol, nparticles);
+
+    vector<double> out = test_gpu_timestep<RHS::GC_CartesianVacuum>(
+        quad_pts, x1_range, x2_range, x3_range, loc_init, m, q, vtotal, vtang, tol, nparticles
+    );
+
+    rescale_abstol_var = true;
+    gpuErrchk(cudaMemcpyToSymbol(rescale_abstol_var_d, &rescale_abstol_var, sizeof(bool)) );
+
+    return out;
 }
 
 extern "C" vector<double> test_timestep_boozer(py::array_t<double> quad_pts, py::array_t<double> x1_range,
