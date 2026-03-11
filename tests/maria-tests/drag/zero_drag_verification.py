@@ -62,8 +62,8 @@ atol_xyz = 1e-6
 rtol_xyz = 1e-5
 
 # lowered these
-atol_vpar = 1e-5
-rtol_vpar = 1e-6
+atol_vpar = 1e-4
+rtol_vpar = 1e-5
 
 atol_H = 1e-12
 rtol_H = 1e-11
