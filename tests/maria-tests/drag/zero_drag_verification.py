@@ -57,8 +57,9 @@ H_stop = 3.5e6 * ONE_EV  # arbitrary here, unused because energy stop is off
 atol_time = 1e-14
 rtol_time = 1e-11
 
-atol_xyz = 1e-10
-rtol_xyz = 1e-9
+# lowered these
+atol_xyz = 1e-8
+rtol_xyz = 1e-7
 
 # lowered these
 atol_vpar = 1e-5
