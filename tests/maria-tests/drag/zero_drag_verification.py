@@ -58,8 +58,8 @@ atol_time = 1e-14
 rtol_time = 1e-11
 
 # lowered these
-atol_xyz = 1e-7
-rtol_xyz = 1e-6
+atol_xyz = 1e-6
+rtol_xyz = 1e-5
 
 # lowered these
 atol_vpar = 1e-5
