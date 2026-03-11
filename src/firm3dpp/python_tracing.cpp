@@ -29,7 +29,7 @@ extern "C" vector<double> boozer_gpu_tracing_backward(py::array_t<double> quad_p
     py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
     double tmax, double tol, double psi0, int nparticles, bool vacuum);
 
-    extern "C" vector<double> cartesian_gpu_tracing_drag(
+extern "C" vector<double> cartesian_gpu_tracing_drag(
         py::array_t<double> quad_pts,
         py::array_t<double> srange,
         py::array_t<double> trange,
@@ -48,7 +48,7 @@ extern "C" vector<double> boozer_gpu_tracing_backward(py::array_t<double> quad_p
         bool use_energy_stop
     );
     
-    extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
+extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
         py::array_t<double> quad_pts,
         py::array_t<double> srange,
         py::array_t<double> trange,
