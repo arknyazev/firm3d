@@ -40,7 +40,6 @@ energy = 500 * ONE_EV
 mass = PROTON_MASS
 charge = ELEMENTARY_CHARGE
 
-# Keep these modest for first regression/debug pass
 tmax_values = np.array([1e-7, 3e-7, 1e-6, 3e-6, 1e-5], dtype=np.float64)
 tol_vals = [1e-9, 1e-10]
 
@@ -48,12 +47,12 @@ seed = 1
 degree = 3
 n = 16
 
-# New drag parameters for regression test
+# New drag parameters for test
 nu_s = 0.0
 use_energy_stop = False
-H_stop = 3.5e6 * ONE_EV  # arbitrary here, unused because energy stop is off
+H_stop = 3.5e6 * ONE_EV  # arbitrary here, unused because energy stop is off (we do time stopping)
 
-# Tolerances for comparisons.
+# Tolerances for comparisons
 atol_time = 1e-14
 rtol_time = 1e-11
 
@@ -312,7 +311,7 @@ stz_init[2::3] = Z_init
 us = np.random.uniform(-1, 1, size=nparticles)
 vtang = (us * speed_total).astype(np.float64)
 
-# For the drag tracer, initial H is total kinetic energy.
+# For the drag tracer
 H_init = np.full(nparticles, H_total, dtype=np.float64)
 
 np.save(out_dir / "particles_initial_xyz.npy", xyz_init)
@@ -324,7 +323,7 @@ proc0_print(f"Saved {nparticles} initial particle positions to {out_dir}")
 
 
 # =============================================================================
-# Main regression test
+# Main test
 # =============================================================================
 
 summary_csv = out_dir / "summary.csv"
@@ -589,7 +588,7 @@ for tol in tol_vals:
             bwd_vac_at_tmax_max = vac
             bwd_drag_at_tmax_max = drag
 
-    # Optional closure comparison at tmax_max for sanity.
+    # closure comparison at tmax_max
     if bwd_vac_at_tmax_max is not None and bwd_drag_at_tmax_max is not None:
         xyz0 = xyz_init[keep, :].astype(np.float64)
 
