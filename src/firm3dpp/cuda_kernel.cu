@@ -169,6 +169,19 @@ __device__ void calc_derivs(double* derivs, int deriv_id, double* quadpts_arr, d
 };
 
 
+// NEW BY MARIA: keeping track of drag directions
+template <RHS id>
+__host__ __device__ constexpr double drag_step_dir() {
+    if constexpr (id == RHS::GC_CartesianDragForward) {
+        return 1.0;
+    } else if constexpr (id == RHS::GC_CartesianDragBackward) {
+        return -1.0;
+    } else {
+        return 1.0;
+    }
+}
+
+
 // calc_derivs implementation for guiding center cartesian vacuum tracing
 template <> 
 __device__ void calc_derivs<RHS::GC_CartesianVacuum>(double* derivs, int deriv_id, double* quadpts_arr, double* x_temp, bool* symmetry_exploited, 
@@ -853,7 +866,13 @@ __device__ void build_state_cartesian_drag(
         "build_state_cartesian_drag only supports drag Cartesian RHS"
     );
 
-    x_temp[threadIdx.x] = t[threadIdx.x] + dp5_t_wgts[deriv_id] * dt[threadIdx.x];
+    constexpr double step_dir = drag_step_dir<id>();
+
+    // Keep t[] as elapsed time >= 0 for control flow, but build physical time with sign.
+    double dt_signed = dt[threadIdx.x];
+    double t_phys = step_dir * t[threadIdx.x];
+
+    x_temp[threadIdx.x] = t_phys + dp5_t_wgts[deriv_id] * dt_signed;
 
     for(int i = 0; i < 5; ++i){
         x_temp[(i + 1) * PARTICLES_PER_BLOCK + threadIdx.x] =
@@ -863,7 +882,7 @@ __device__ void build_state_cartesian_drag(
     for(int j = 0; j < deriv_id; ++j){
         for(int i = 0; i < 5; ++i){
             x_temp[(i + 1) * PARTICLES_PER_BLOCK + threadIdx.x] +=
-                dt[threadIdx.x] *
+                dt_signed *
                 dp5_wgts[deriv_id][j] *
                 derivs[(7 * j + i) * PARTICLES_PER_BLOCK + threadIdx.x];
         }
@@ -906,7 +925,6 @@ __device__ void build_state_cartesian_drag(
     index_j[threadIdx.x] = j / 3;
     index_k[threadIdx.x] = k / 3;
 }
-
 
 // calculate maximum allowable timestep to allow at most a quarter of a revolution per step
 template<CoordSys coord>
@@ -998,6 +1016,8 @@ __device__ void setup_particle_cartesian_drag(
         "setup_particle_cartesian_drag only supports drag Cartesian RHS"
     );
 
+    constexpr double step_dir = drag_step_dir<id>();
+
     if(threadIdx.x < nparticles_blk){
         t[threadIdx.x] = 0.0;
         dt[threadIdx.x] = 0.0;
@@ -1040,7 +1060,9 @@ __device__ void setup_particle_cartesian_drag(
     if(threadIdx.x < nparticles_blk){
         calc_max_timestep_size<CoordSys::Cartesian>(dtmax, x_temp, derivs);
         dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
-        dt[threadIdx.x] = 1e-3 * dtmax[threadIdx.x];
+
+        // Signed timestep: positive for forward drag, negative for backward drag.
+        dt[threadIdx.x] = step_dir * (1e-3 * dtmax[threadIdx.x]);
     }
 }
 
@@ -1172,9 +1194,14 @@ __device__ void adjust_time_cartesian_drag(
         "adjust_time_cartesian_drag only supports drag Cartesian RHS"
     );
 
+    constexpr double step_dir = drag_step_dir<id>();
+
     if(has_left[threadIdx.x] || hit_energy_stop[threadIdx.x]){
         return;
     }
+
+    double dt_signed = dt[threadIdx.x];
+    double dt_mag = fabs(dt_signed);
 
     const double bhat1 = 71.0 / 57600.0;
     const double bhat3 = -71.0 / 16695.0;
@@ -1190,7 +1217,7 @@ __device__ void adjust_time_cartesian_drag(
         double deriv_i = derivs[(7 * 0 + i) * PARTICLES_PER_BLOCK + threadIdx.x];
 
         double err_elt =
-            dt[threadIdx.x] *
+            dt_mag *
             (bhat1 * deriv_i
              + bhat3 * derivs[(7 * 2 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
              + bhat4 * derivs[(7 * 3 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
@@ -1205,11 +1232,11 @@ __device__ void adjust_time_cartesian_drag(
             atol_i *= 0.5 * mass_d * v_total_d * v_total_d;
         }
 
-        err_elt = fabs(err_elt) / (atol_i + rtol_d * (fabs(state_i) + dt[threadIdx.x] * fabs(deriv_i)));
+        err_elt = fabs(err_elt) / (atol_i + rtol_d * (fabs(state_i) + dt_mag * fabs(deriv_i)));
         max_err = fmax(max_err, err_elt);
     }
 
-    double dt_new = dt[threadIdx.x] * 0.9;
+    double dt_new = dt_mag * 0.9;
     double exponent = 0.0;
 
     if(max_err > 1.0){
@@ -1220,16 +1247,21 @@ __device__ void adjust_time_cartesian_drag(
     }
 
     dt_new *= pow(max_err, exponent);
-    dt_new = fmax(dt_new, 0.2 * dt[threadIdx.x]);
-    dt_new = fmin(dt_new, 5.0 * dt[threadIdx.x]);
+    dt_new = fmax(dt_new, 0.2 * dt_mag);
+    dt_new = fmin(dt_new, 5.0 * dt_mag);
 
     if(max_err <= 1.0){
         if(0.5 < max_err){
-            dt_new = dt[threadIdx.x];
+            dt_new = dt_mag;
         }
 
-        t[threadIdx.x] += dt[threadIdx.x];
-        dt[threadIdx.x] = fmin(dt_new, tmax_d - t[threadIdx.x]);
+        // Advance elapsed time with positive magnitude.
+        t[threadIdx.x] += dt_mag;
+
+        // Remaining elapsed time before reaching tmax_d.
+        double remaining = tmax_d - t[threadIdx.x];
+        double next_mag = fmin(dt_new, remaining);
+        dt[threadIdx.x] = step_dir * next_mag;
 
         for(int i = 0; i < 5; ++i){
             state[i * PARTICLES_PER_BLOCK + threadIdx.x] =
@@ -1268,7 +1300,8 @@ __device__ void adjust_time_cartesian_drag(
             stop_reason[threadIdx.x] = 0; // reached tmax
         }
     } else {
-        dt[threadIdx.x] = dt_new;
+        // Reject step: keep the sign, only reduce the magnitude.
+        dt[threadIdx.x] = step_dir * dt_new;
     }
 }
 
