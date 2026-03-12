@@ -118,11 +118,14 @@ def summarize_stop_codes(stop_codes: np.ndarray):
     return {int(k): int(v) for k, v in zip(uniq, counts)}
 
 
-def save_csv(csv_path: Path, rows: list[dict]):
+def save_csv(path, rows):
     if not rows:
         return
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+
+    fieldnames = sorted({k for row in rows for k in row.keys()})
+
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
