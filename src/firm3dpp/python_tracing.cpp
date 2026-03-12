@@ -25,10 +25,6 @@ extern "C" vector<double> cartesian_gpu_tracing_backward(py::array_t<double> qua
     py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
     double tmax, double tol, int nparticles);
 
-extern "C" vector<double> boozer_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
-    py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
-    double tmax, double tol, double psi0, int nparticles, bool vacuum);
-
 extern "C" vector<double> cartesian_gpu_tracing_drag(
         py::array_t<double> quad_pts,
         py::array_t<double> srange,
@@ -40,7 +36,8 @@ extern "C" vector<double> cartesian_gpu_tracing_drag(
         double vtotal,
         py::array_t<double> vtang,
         py::array_t<double> H_init,
-        double nu_s,
+        double nu_s0,
+        double Q0,
         double tmax,
         double tol,
         int nparticles,
@@ -59,7 +56,8 @@ extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
         double vtotal,
         py::array_t<double> vtang,
         py::array_t<double> H_init,
-        double nu_s,
+        double nu_s0,
+        double Q0,
         double tmax,
         double tol,
         int nparticles,
@@ -240,7 +238,8 @@ void init_tracing(py::module_ &m){
         py::arg("vtotal"),
         py::arg("vtang"),
         py::arg("H_init"),
-        py::arg("nu_s"),
+        py::arg("nu_s0"),
+        py::arg("Q0"),
         py::arg("tmax"),
         py::arg("tol"),
         py::arg("nparticles"),
@@ -259,7 +258,8 @@ void init_tracing(py::module_ &m){
         py::arg("vtotal"),
         py::arg("vtang"),
         py::arg("H_init"),
-        py::arg("nu_s"),
+        py::arg("nu_s0"),
+        py::arg("Q0"),
         py::arg("tmax"),
         py::arg("tol"),
         py::arg("nparticles"),
