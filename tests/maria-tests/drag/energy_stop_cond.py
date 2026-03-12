@@ -58,8 +58,8 @@ energy0_ev = 0.5e6                # 0.5 MeV
 energy0 = energy0_ev * ONE_EV     # joules
 
 # Backward stopping threshold
-H_stop_ev = 3.5e6                 # 3.5 MeV
-H_stop = H_stop_ev * ONE_EV       # MUST be in joules
+H_stop_ev = 1.5e6                 # lowered this to reach it
+H_stop = H_stop_ev * ONE_EV       # joules
 
 # drag coefficient used in the H law: dH/dt = -nu_s H
 nu_s = 2.0e5                      # 1/s, choose something strong enough to see effect
