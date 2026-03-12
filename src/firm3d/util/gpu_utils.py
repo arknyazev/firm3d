@@ -1,6 +1,6 @@
 import numpy as np
 
-__all__ = ["boozer_interpolant", "cartesian_interpolant"]
+__all__ = ["boozer_interpolant", "cartesian_interpolant", "cartesian_interpolant_drag"]
 
 
 def boozer_interpolant(field, nfp, ns, ntheta, nzeta, vacuum=False):
@@ -179,7 +179,7 @@ def boozer_saw_interpolant(field, nfp, ns, ntheta, nzeta):
 
 def cartesian_interpolant(field, sc_particle, nfp, n_metagrid_pts):
     r"""
-    Set up a Boozer vacuum interpolant for tracing.
+    Set up a cartesian vacuum interpolant for tracing.
 
     Args:
         field: MagneticField object
@@ -243,7 +243,8 @@ def cartesian_interpolant(field, sc_particle, nfp, n_metagrid_pts):
                 # if cell_r == 24 and cell_phi == 22 and cell_z == 20:
                 #     print(row_start)
 
-                assert 3 * cell_r + i < r_range[2]
+                # why is this line here? i is only defined later
+                #assert 3 * cell_r + i < r_range[2]
                 # iterate over spline locations for this cell
                 for i in range(4):
                     for j in range(4):
@@ -261,3 +262,88 @@ def cartesian_interpolant(field, sc_particle, nfp, n_metagrid_pts):
     cell_quad_pts = np.ascontiguousarray(cell_quad_pts)
 
     return r_range, phi_range, z_range, cell_quad_pts
+
+
+# NEW BY MARIA: interpolant for drag (need to interpolate tau)
+def cartesian_interpolant_drag(field, sc_particle, ne_fun, Te_fun, nfp, n_metagrid_pts):
+    r"""
+    Set up a Cartesian interpolant for drag tracing.
+
+    Returns columns:
+        B_r, B_phi, B_z,
+        GradAbsB_r, GradAbsB_phi, GradAbsB_z,
+        signed_dist,
+        n_e,
+        T_e
+
+    Requirements:
+        ne_fun: callable taking quad_pts of shape (N, 3) in (r, phi, z) coordinates
+                and returning shape (N,) or (N,1), in m^-3
+        Te_fun: callable taking quad_pts of shape (N, 3) in (r, phi, z) coordinates
+                and returning shape (N,) or (N,1), either in eV or J
+                depending on what the CUDA side expects via Te_unit_d
+    """
+
+    r_range = (field.r_range[0], field.r_range[1], 3 * field.r_range[2] + 1)
+    phi_range = (field.phi_range[0], field.phi_range[1], 3 * field.phi_range[2] + 1)
+    z_range = (field.z_range[0], field.z_range[1], 3 * field.z_range[2] + 1)
+
+    r_grid = np.linspace(r_range[0], r_range[1], r_range[2])
+    phi_grid = np.linspace(phi_range[0], phi_range[1], phi_range[2])
+    z_grid = np.linspace(z_range[0], z_range[1], z_range[2])
+
+    quad_pts = np.empty((r_range[2] * phi_range[2] * z_range[2], 3))
+    for i in range(r_range[2]):
+        for j in range(phi_range[2]):
+            for k in range(z_range[2]):
+                quad_pts[phi_range[2] * z_range[2] * i + z_range[2] * j + k, :] = [
+                    r_grid[i],
+                    phi_grid[j],
+                    z_grid[k],
+                ]
+
+    field.set_points_cyl(quad_pts)
+
+    B = field.B_cyl()
+    GradAbsB = field.GradAbsB_cyl()
+    signed_dist_vals = sc_particle.evaluate_rphiz(quad_pts)
+
+    ne_vals = np.asarray(ne_fun(quad_pts), dtype=np.float64).reshape(-1, 1)
+    Te_vals = np.asarray(Te_fun(quad_pts), dtype=np.float64).reshape(-1, 1)
+
+    if ne_vals.shape[0] != quad_pts.shape[0]:
+        raise ValueError(f"ne_fun returned wrong length: got {ne_vals.shape[0]}, expected {quad_pts.shape[0]}")
+    if Te_vals.shape[0] != quad_pts.shape[0]:
+        raise ValueError(f"Te_fun returned wrong length: got {Te_vals.shape[0]}, expected {quad_pts.shape[0]}")
+
+    quad_info = np.hstack((B, GradAbsB, signed_dist_vals, ne_vals, Te_vals))
+
+    cell_quad_pts = np.empty(
+        (
+            field.r_range[2] * field.z_range[2] * field.phi_range[2] * 64,
+            quad_info.shape[1],
+        )
+    )
+
+    for cell_r in range(field.r_range[2]):
+        for cell_phi in range(field.phi_range[2]):
+            for cell_z in range(field.z_range[2]):
+                row_start = 64 * (
+                    cell_r * field.phi_range[2] * field.z_range[2]
+                    + cell_phi * field.z_range[2]
+                    + cell_z
+                )
+
+                for i in range(4):
+                    for j in range(4):
+                        for k in range(4):
+                            row_idx = row_start + 16 * i + 4 * j + k
+                            cell_quad_pts[row_idx, :] = quad_info[
+                                phi_range[2] * z_range[2] * (3 * cell_r + i)
+                                + z_range[2] * (3 * cell_phi + j)
+                                + 3 * cell_z
+                                + k,
+                                :,
+                            ]
+
+    return r_range, phi_range, z_range, np.ascontiguousarray(cell_quad_pts)

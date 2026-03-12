@@ -18,6 +18,15 @@ This script does two things:
 
 2) Backward tracing with energy stopping enabled:
    stop when H >= H_stop
+
+NEED TO ADD r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
+    field=bsh,
+    sc_particle=sc_particle,
+    ne_fun=ne_fun,
+    Te_fun=Te_fun,
+    nfp=nfp,
+    n_metagrid_pts=n,
+) CORRECTLY HERE FOR VACUUM VS DRAG OPTIONS
 """
 
 import csv

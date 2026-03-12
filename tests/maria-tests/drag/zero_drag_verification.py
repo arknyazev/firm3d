@@ -4,6 +4,15 @@
 Verify that when nu_s = 0 and Q0=0 and energy stopping is disabled (use_energy_stop = False), the new drag
 tracers reproduce the existing vacuum Cartesian tracers.
 (both forward and backward)
+
+NEED TO ADD r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
+    field=bsh,
+    sc_particle=sc_particle,
+    ne_fun=ne_fun,
+    Te_fun=Te_fun,
+    nfp=nfp,
+    n_metagrid_pts=n,
+) CORRECTLY HERE FOR VACUUM VS DRAG OPTIONS
 """
 
 import csv
@@ -286,6 +295,7 @@ proc0_print("Error in GradAbsB:", bsh.estimate_error_GradAbsB(1000), flush=True)
 
 t1 = time.time()
 r_range, phi_range, z_range, cell_quad_pts = cartesian_interpolant(bsh, sc_particle, nfp, n)
+
 t2 = time.time()
 proc0_print(f"GPU interpolant built in {t2 - t1:.3f}s", flush=True)
 
