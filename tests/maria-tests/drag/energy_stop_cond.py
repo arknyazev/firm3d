@@ -20,7 +20,6 @@ This script does two things:
 
 2) Backward tracing with energy stopping enabled:
    stop when H >= H_stop
-   with H_stop = 3.5 MeV (converted to joules!)
 """
 
 import csv
@@ -58,7 +57,7 @@ energy0_ev = 0.5e6                # 0.5 MeV
 energy0 = energy0_ev * ONE_EV     # joules
 
 # Backward stopping threshold
-H_stop_ev = 1.5e6                 # lowered this to reach it
+H_stop_ev = 1.0e6                 # lowered this to reach it
 H_stop = H_stop_ev * ONE_EV       # joules
 
 # drag coefficient used in the H law: dH/dt = -nu_s H
@@ -405,11 +404,11 @@ assert ok_H_b, "Backward H(t)=H0 exp(+nu_s t) check failed."
 
 
 # =============================================================================
-# Part 2: Backward tracing with H_stop = 3.5 MeV
+# Part 2: Backward tracing with H_stop
 # =============================================================================
 
 proc0_print("")
-proc0_print("Part 2: backward tracing with H-stop at 3.5 MeV")
+proc0_print(f"Part 2: backward tracing with H-stop at {H_stop_ev} eV")
 proc0_print("-----------------------------------------------")
 
 bwd_stop = run_cartesian_drag(
