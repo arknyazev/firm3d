@@ -3,6 +3,7 @@
 #include <iostream>
 #include "tracing.h"
 #include <math.h>
+#include <float.h>
 #include "xtensor-python/pyarray.hpp"     // Numpy bindings
 typedef xt::pyarray<double> PyArray;
 #include "xtensor-python/pytensor.hpp"     // Numpy bindings
@@ -89,6 +90,11 @@ __constant__ bool is_test_d = false;
 // +1 forward tracing (default), -1 backward (set only by new backward entrypoints)
 __constant__ int dir_d = 1;
 
+// NEW BY MARIA for nu_s interpolation
+__constant__ double coulomb_log_d;
+__constant__ double Te_unit_d;  // this is 1 if our interpolated Te is already in joules
+
+
 // NEW BY MARIA: current speed from energy for drag, v = sqrt(2H/m)
 __device__ inline double current_speed_from_H(double H){
     return sqrt(fmax(2.0 * H / mass_d, 0.0));
@@ -106,6 +112,45 @@ __device__ void calc_max_timestep_size_cartesian_drag(double* dtmax, double* loc
 
     // same quarter-turn heuristic as vacuum, but with current speed
     dtmax[threadIdx.x] = r * 0.5 * M_PI / fmax(v_curr, 1e-30);
+}
+
+
+// NEW BY MARIA: tau computation (then convert to nu by inverting)
+__device__ inline double slowing_down_time_si(double ne, double Te_raw){
+    // Inputs:
+    //   ne     [m^-3]
+    //   Te_raw [J] if Te_unit_d = 1
+    //          [eV] if Te_unit_d = e
+    //
+    // Output:
+    //   tau_s [s]
+
+    const double eps0 = 8.8541878128e-12;      // F/m
+    const double e_ch = 1.602176634e-19;       // C
+    const double m_e  = 9.1093837015e-31;      // kg
+
+    // Fast-ion species parameters (should this be configurable ..?)
+    const double Z_alpha = 2.0;
+
+    double Te_J = Te_raw * Te_unit_d;
+
+    // Guards
+    ne   = fmax(ne, 1e-300);
+    Te_J = fmax(Te_J, 1e-300);
+    double lnL = fmax(coulomb_log_d, 1e-6);
+
+    double numerator =
+        3.0 * pow(2.0 * M_PI, 1.5) * eps0 * eps0 * mass_d * pow(Te_J, 1.5);
+
+    double denominator =
+        Z_alpha * Z_alpha * pow(e_ch, 4.0) * sqrt(m_e) * ne * lnL;
+
+    return numerator / denominator;
+}
+
+__device__ inline double slowdown_frequency_from_ne_Te(double ne, double Te_raw){
+    double tau_s = slowing_down_time_si(ne, Te_raw);
+    return 1.0 / fmax(tau_s, 1e-300);
 }
 
 /* shape computes shape functions for cubic interpolation on a a regular grid
@@ -337,8 +382,7 @@ __device__ void calc_derivs_cartesian_drag(
 
         double bhat_dot_gradB = (B_x * GradAbsB_x + B_y * GradAbsB_y + B_z * GradAbsB_z) / fmax(AbsB, 1e-30);
 
-        double nu_s_local = slowdown_frequency_from_ne_Te(ne_local, Te_local, H);
-
+        double nu_s_local = slowdown_frequency_from_ne_Te(ne_local, Te_local);
         double dvpar_drag = -0.5 * nu_s_local * v_par;
         double dHdt       = -nu_s_local * H;
 
@@ -1683,7 +1727,8 @@ vector<double> gpu_tracing_cartesian_drag(
     double vtotal,
     py::array_t<double> vtang,
     py::array_t<double> H_init,
-    double nu_s0,
+    double coulomb_log,
+    bool Te_in_eV,
     double tmax,
     double tol,
     int nparticles,
@@ -1738,9 +1783,12 @@ vector<double> gpu_tracing_cartesian_drag(
     gpuErrchk(cudaMemcpyToSymbol(atol_d, &tol, sizeof(double)));
     gpuErrchk(cudaMemcpyToSymbol(rtol_d, &tol, sizeof(double)));
     gpuErrchk(cudaMemcpyToSymbol(v_total_d, &vtotal, sizeof(double)));
-    gpuErrchk(cudaMemcpyToSymbol(nu_s0_d, &nu_s0, sizeof(double)));
     gpuErrchk(cudaMemcpyToSymbol(H_stop_d, &H_stop, sizeof(double)));
     gpuErrchk(cudaMemcpyToSymbol(use_energy_stop_d, &use_energy_stop, sizeof(bool)));
+
+    gpuErrchk(cudaMemcpyToSymbol(coulomb_log_d, &coulomb_log, sizeof(double)));
+    double Te_unit = Te_in_eV ? 1.602176634e-19 : 1.0;
+    gpuErrchk(cudaMemcpyToSymbol(Te_unit_d, &Te_unit, sizeof(double)));
 
     gpuErrchk(cudaMemcpyToSymbol(n_x2_d, &n_x2, sizeof(int)));
     gpuErrchk(cudaMemcpyToSymbol(n_x3_d, &n_x3, sizeof(int)));
@@ -1817,7 +1865,8 @@ extern "C" vector<double> cartesian_gpu_tracing_drag(
     double vtotal,
     py::array_t<double> vtang,
     py::array_t<double> H_init,
-    double nu_s0,
+    double coulomb_log,
+    bool Te_in_eV,
     double tmax,
     double tol,
     int nparticles,
@@ -1828,7 +1877,7 @@ extern "C" vector<double> cartesian_gpu_tracing_drag(
     return gpu_tracing_cartesian_drag<RHS::GC_CartesianDragForward>(
         quad_pts, srange, trange, zrange,
         stz_init, m, q, vtotal, vtang, H_init,
-        nu_s0, tmax, tol, nparticles,
+        coulomb_log, Te_in_eV, tmax, tol, nparticles,
         H_stop, use_energy_stop
     );
 }
@@ -1844,7 +1893,8 @@ extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
     double vtotal,
     py::array_t<double> vtang,
     py::array_t<double> H_init,
-    double nu_s0,
+    double coulomb_log,
+    bool Te_in_eV,
     double tmax,
     double tol,
     int nparticles,
@@ -1855,7 +1905,7 @@ extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
     return gpu_tracing_cartesian_drag<RHS::GC_CartesianDragBackward>(
         quad_pts, srange, trange, zrange,
         stz_init, m, q, vtotal, vtang, H_init,
-        nu_s0, tmax, tol, nparticles,
+        coulomb_log, Te_in_eV, tmax, tol, nparticles,
         H_stop, use_energy_stop
     );
 }
