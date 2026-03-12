@@ -61,7 +61,7 @@ H_stop_ev = 1.0e6                 # lowered this to reach it
 H_stop = H_stop_ev * ONE_EV       # joules
 
 # drag coefficient used in the H law: dH/dt = -nu_s H
-nu_s = 4.0e5                      # 1/s, choose something strong enough to see effect
+nu_s = 9.0e5                      # 1/s, choose something strong enough to see effect
 Q0 = 0.0                          # unused here; keep source integral turned off for clarity
 
 # tracing / numerical params
