@@ -48,8 +48,10 @@ degree = 3
 n = 16
 
 # New drag parameters for test
-nu_s = 0.0
-Q0 = 0.0
+# for nu
+coulomb_log = 17.0
+Te_in_eV = True
+
 use_energy_stop = False
 H_stop = 3.5e6 * ONE_EV # arbitrary here, unused because energy stop is off (we do time stopping)
 
@@ -175,8 +177,8 @@ def run_cartesian_drag(
     speed_total,
     vtang,
     H_init,
-    nu_s,
-    Q0,
+    coulomb_log,
+    Te_in_eV,
     tmax,
     tol,
     nparticles,
@@ -194,8 +196,8 @@ def run_cartesian_drag(
         float(speed_total),
         np.asarray(vtang, dtype=np.float64),
         np.asarray(H_init, dtype=np.float64),
-        float(nu_s),
-        float(Q0),
+        float(coulomb_log),
+        bool(Te_in_eV),
         float(tmax),
         float(tol),
         int(nparticles),
@@ -379,8 +381,8 @@ for tol in tol_vals:
             speed_total,
             vtang,
             H_init,
-            nu_s,
-            Q0,
+            coulomb_log,
+            Te_in_eV,
             float(tmax),
             float(tol),
             nparticles,
@@ -515,8 +517,8 @@ for tol in tol_vals:
             speed_total,
             vtang_b0,
             H_b0,
-            nu_s,
-            Q0,
+            coulomb_log,
+            Te_in_eV,
             float(tmax),
             float(tol),
             n_keep,

@@ -58,8 +58,9 @@ energy0 = energy0_ev * ONE_EV     # joules
 H_stop_ev = 1.0e6                 # lowered this to reach it
 H_stop = H_stop_ev * ONE_EV       # joules
 
-# drag coefficient used in the H law: dH/dt = -nu_s H
-nu_s = 1.0e6                      # 1/s, choose something strong enough to see effect
+# for nu
+coulomb_log = 17.0
+Te_in_eV = True
 
 # tracing / numerical params
 tol = 1e-10
@@ -128,43 +129,42 @@ def save_csv(path, rows):
 
 def run_cartesian_drag(
     tracer,
-    cell_quad_pts,
+    cell_quad_pts_drag,
     r_range,
     phi_range,
     z_range,
     stz_init,
     mass,
     charge,
-    speed_total,
+    vtotal_ref,
     vtang,
     H_init,
-    nu_s,
+    coulomb_log,
+    Te_in_eV,
     tmax,
     tol,
-    nparticles,
     H_stop,
-    use_energy_stop,
 ):
-    results = tracer(
-        cell_quad_pts,
+    out = tracer(
+        cell_quad_pts_drag,
         np.array(r_range, dtype=np.float64),
         np.array(phi_range, dtype=np.float64),
         np.array(z_range, dtype=np.float64),
         np.asarray(stz_init, dtype=np.float64),
         float(mass),
         float(charge),
-        float(speed_total),
+        float(vtotal_ref),
         np.asarray(vtang, dtype=np.float64),
         np.asarray(H_init, dtype=np.float64),
-        float(nu_s),
+        float(coulomb_log),
+        bool(Te_in_eV),
         float(tmax),
         float(tol),
-        int(nparticles),
+        int(len(H_init)),
         float(H_stop),
-        bool(use_energy_stop),
+        True,
     )
-    return np.asarray(results, dtype=np.float64).reshape(int(nparticles), 8)
-    # columns: [t, x, y, z, vpar, H, I_Q, stop_reason]
+    return np.asarray(out, dtype=np.float64).reshape(len(H_init), 7)
 
 
 # =============================================================================
@@ -287,13 +287,15 @@ fwd = run_cartesian_drag(
     speed_total,
     vtang,
     H_init,
-    nu_s,
+    coulomb_log,
+    Te_in_eV,
     tmax_forward,
     tol,
     nparticles,
     H_stop=0.0,
     use_energy_stop=False,
 )
+
 
 bwd = run_cartesian_drag(
     cartesian_gpu_tracing_backward_drag,
@@ -307,7 +309,8 @@ bwd = run_cartesian_drag(
     speed_total,
     vtang,
     H_init,
-    nu_s,
+    coulomb_log,
+    Te_in_eV,
     tmax_forward,
     tol,
     nparticles,
@@ -416,7 +419,8 @@ bwd_stop = run_cartesian_drag(
     speed_total,
     vtang,
     H_init,
-    nu_s,
+    coulomb_log,
+    Te_in_eV,
     tmax_backward,
     tol,
     nparticles,
@@ -425,7 +429,7 @@ bwd_stop = run_cartesian_drag(
 )
 
 H_final = bwd_stop[:, 5]
-stop_codes = bwd_stop[:, 7].astype(int)
+stop_codes = bwd_stop[:, 7].astype(int) # should be 6?
 
 print("max final H [MeV] =", np.max(H_final) / ONE_EV / 1e6)
 print("target H_stop [MeV] =", H_stop / ONE_EV / 1e6)
