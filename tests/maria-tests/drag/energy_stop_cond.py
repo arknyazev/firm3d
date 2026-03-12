@@ -60,7 +60,6 @@ H_stop = H_stop_ev * ONE_EV       # joules
 
 # drag coefficient used in the H law: dH/dt = -nu_s H
 nu_s = 1.0e6                      # 1/s, choose something strong enough to see effect
-Q0 = 0.0                          # unused here; keep source integral turned off for clarity
 
 # tracing / numerical params
 tol = 1e-10
@@ -140,7 +139,6 @@ def run_cartesian_drag(
     vtang,
     H_init,
     nu_s,
-    Q0,
     tmax,
     tol,
     nparticles,
@@ -159,7 +157,6 @@ def run_cartesian_drag(
         np.asarray(vtang, dtype=np.float64),
         np.asarray(H_init, dtype=np.float64),
         float(nu_s),
-        float(Q0),
         float(tmax),
         float(tol),
         int(nparticles),
@@ -291,7 +288,6 @@ fwd = run_cartesian_drag(
     vtang,
     H_init,
     nu_s,
-    Q0,
     tmax_forward,
     tol,
     nparticles,
@@ -312,7 +308,6 @@ bwd = run_cartesian_drag(
     vtang,
     H_init,
     nu_s,
-    Q0,
     tmax_forward,
     tol,
     nparticles,
@@ -422,7 +417,6 @@ bwd_stop = run_cartesian_drag(
     vtang,
     H_init,
     nu_s,
-    Q0,
     tmax_backward,
     tol,
     nparticles,
@@ -444,8 +438,7 @@ t_s = bwd_stop[:, 0]
 xyz_s = bwd_stop[:, 1:4]
 vpar_s = bwd_stop[:, 4]
 H_s = bwd_stop[:, 5]
-IQ_s = bwd_stop[:, 6]
-stop_s = bwd_stop[:, 7].astype(int)
+stop_s = bwd_stop[:, 6].astype(int)
 
 proc0_print(f"Backward-with-stop stop codes: {summarize_stop_codes(stop_s)}")
 
@@ -493,7 +486,6 @@ for i in range(nparticles):
         "H_final_MeV": float(H_s[i] / ONE_EV / 1e6),
         "H_stop_J": float(H_stop),
         "H_stop_MeV": float(H_stop / ONE_EV / 1e6),
-        "IQ_final": float(IQ_s[i]),
         "stop_reason": int(stop_s[i]),
         "hit_energy_stop": bool(stop_s[i] == 2),
         "exact_threshold_time_s": float(t_hit_exact[i]),

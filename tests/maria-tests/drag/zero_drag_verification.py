@@ -68,9 +68,6 @@ rtol_vpar = 1e-5
 atol_H = 1e-12
 rtol_H = 1e-11
 
-atol_IQ = 1e-14
-rtol_IQ = 1e-11
-
 
 # =============================================================================
 # Output directory
@@ -205,7 +202,7 @@ def run_cartesian_drag(
         float(H_stop),
         bool(use_energy_stop),
     )
-    return np.asarray(results, dtype=np.float64).reshape(int(nparticles), 8)
+    return np.asarray(results, dtype=np.float64).reshape(int(nparticles), 7)
 
 
 def save_compare_bundle(run_dir: Path, prefix: str, vac: np.ndarray, drag: np.ndarray):
@@ -401,20 +398,12 @@ for tol in tol_vals:
         xyz_drag = drag[:, 1:4]
         vpar_drag = drag[:, 4]
         H_drag = drag[:, 5]
-        IQ_drag = drag[:, 6]
-        stop_drag = drag[:, 7].astype(int)
+        stop_drag = drag[:, 6].astype(int)
 
         ok_t, max_abs_t, max_rel_t = compare_arrays("t_final", t_drag, t_vac, atol_time, rtol_time)
         ok_xyz, max_abs_xyz, max_rel_xyz = compare_arrays("xyz", xyz_drag, xyz_vac, atol_xyz, rtol_xyz)
         ok_v, max_abs_v, max_rel_v = compare_arrays("vpar", vpar_drag, vpar_vac, atol_vpar, rtol_vpar)
         ok_H, max_abs_H, max_rel_H = compare_arrays("H", H_drag, H_init, atol_H, rtol_H)
-        ok_IQ, max_abs_IQ, max_rel_IQ = compare_arrays(
-            "I_Q",
-            IQ_drag,
-            np.zeros_like(IQ_drag),
-            atol_IQ,
-            rtol_IQ,
-        )
 
         no_energy_stops = np.all(stop_drag != 2)
 
@@ -451,7 +440,6 @@ for tol in tol_vals:
         assert ok_v, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] vpar mismatch"
         assert ok_H, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] H is not constant when nu_s=0"
         assert no_energy_stops, f"[FWD, tol={tol:.2e}, tmax={tmax:.2e}] unexpected energy stop with use_energy_stop=False"
-        assert ok_IQ, f"... I_Q is not zero when Q0=0"
 
         n_cases += 1
         n_cases_passed += 1
@@ -546,20 +534,12 @@ for tol in tol_vals:
         xyz_drag = drag[:, 1:4]
         vpar_drag = drag[:, 4]
         H_drag = drag[:, 5]
-        IQ_drag = drag[:, 6]
-        stop_drag = drag[:, 7].astype(int)
+        stop_drag = drag[:, 6].astype(int)
 
         ok_t, max_abs_t, max_rel_t = compare_arrays("t_final", t_drag, t_vac, atol_time, rtol_time)
         ok_xyz, max_abs_xyz, max_rel_xyz = compare_arrays("xyz", xyz_drag, xyz_vac, atol_xyz, rtol_xyz)
         ok_v, max_abs_v, max_rel_v = compare_arrays("vpar", vpar_drag, vpar_vac, atol_vpar, rtol_vpar)
         ok_H, max_abs_H, max_rel_H = compare_arrays("H", H_drag, H_b0, atol_H, rtol_H)
-        ok_IQ, max_abs_IQ, max_rel_IQ = compare_arrays(
-            "I_Q",
-            IQ_drag,
-            np.zeros_like(IQ_drag),
-            atol_IQ,
-            rtol_IQ,
-        )
 
         no_energy_stops = np.all(stop_drag != 2)
 
@@ -596,7 +576,6 @@ for tol in tol_vals:
         assert ok_v, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] vpar mismatch"
         assert ok_H, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] H is not constant when nu_s=0"
         assert no_energy_stops, f"[BWD, tol={tol:.2e}, tmax={tmax:.2e}] unexpected energy stop with use_energy_stop=False"
-        assert ok_IQ, f"... I_Q is not zero when Q0=0"
 
         n_cases += 1
         n_cases_passed += 1
