@@ -432,6 +432,14 @@ bwd_stop = run_cartesian_drag(
     use_energy_stop=True,
 )
 
+H_final = bwd_stop[:, 5]
+stop_codes = bwd_stop[:, 7].astype(int)
+
+print("max final H [MeV] =", np.max(H_final) / ONE_EV / 1e6)
+print("target H_stop [MeV] =", H_stop / ONE_EV / 1e6)
+print("num with H_final >= H_stop:", np.sum(H_final >= H_stop))
+print("num stop_code == 2:", np.sum(stop_codes == 2))
+
 np.save(out_dir / "backward_with_H_stop.npy", bwd_stop)
 
 t_s = bwd_stop[:, 0]
