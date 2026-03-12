@@ -9,14 +9,12 @@ This script does two things:
    dH/dt = -nu_s H
 
    With the current implementation:
-   - forward tracing should decrease H
+   - forward tracing should decrease H (drag decreases speed)
    - backward tracing should increase H
 
    Since the tracer returns elapsed time t >= 0 in both cases, we expect:
    - forward:  ln(H_final) - ln(H0) ~= -nu_s * t_final
-              => ln(H_final) + nu_s * t_final ~= ln(H0)
    - backward: ln(H_final) - ln(H0) ~= +nu_s * t_final
-              => ln(H_final) - nu_s * t_final ~= ln(H0)
 
 2) Backward tracing with energy stopping enabled:
    stop when H >= H_stop
@@ -76,7 +74,7 @@ required_backward_time = np.log(H_stop / energy0) / nu_s
 tmax_forward = 2.0e-6
 tmax_backward = max(1.2 * required_backward_time, 2.0e-6)
 
-# loose-ish numerical tolerances for invariant checks
+# numerical tolerances for invariant checks
 abs_tol_log = 5e-7
 rel_tol_log = 5e-6
 abs_tol_H = 5e-7 * energy0
