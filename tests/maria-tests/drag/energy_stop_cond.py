@@ -88,7 +88,6 @@ timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 out_dir = script_dir / "outputs_drag_H_stop_test" / timestamp
 out_dir.mkdir(parents=True, exist_ok=True)
 
-proc0_print("Running drag_H_stop_test.py")
 proc0_print("========================================")
 proc0_print(f"Saving outputs to: {out_dir}")
 proc0_print(f"Initial energy: {energy0_ev/1e6:.3f} MeV = {energy0:.6e} J")
