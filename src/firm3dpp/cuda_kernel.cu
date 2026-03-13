@@ -2128,14 +2128,23 @@ __device__ void account_for_symmetry<CoordSys::Boozer>(double* interpolants, boo
 template<RHS id, int n>
 __device__ void account_for_symmetry_rhs(double* interpolants, bool* symmetry_exploited){
     if(!symmetry_exploited[threadIdx.x]) return;
-    if constexpr (id == RHS::GC_CartesianVacuum){
-        interpolants[0] *= -1.0;
-        interpolants[4] *= -1.0;
-        interpolants[5] *= -1.0;
-    } else if constexpr (id == RHS::GC_BoozerVacuum || id == RHS::GC_BoozerVacuumSAW){
-        // Only theta/zeta derivatives flip sign
+
+    if constexpr (
+        id == RHS::GC_CartesianVacuum ||
+        id == RHS::GC_CartesianDragForward ||
+        id == RHS::GC_CartesianDragBackward
+    ){
+        interpolants[0] *= -1.0;  // B_r
+        interpolants[4] *= -1.0;  // d|B|/dphi
+        interpolants[5] *= -1.0;  // d|B|/dz
+
+    } else if constexpr (
+        id == RHS::GC_BoozerVacuum ||
+        id == RHS::GC_BoozerVacuumSAW
+    ){
         interpolants[2] *= -1.0;
         interpolants[3] *= -1.0;
+
     } else if constexpr (id == RHS::GC_Boozer){
         // 12-field ordering: flip dB/dtheta, dB/dzeta, and K
         interpolants[2] *= -1.0;  // d|B|/dtheta
