@@ -93,10 +93,6 @@ proc0_print("========================================")
 proc0_print(f"Saving outputs to: {out_dir}")
 proc0_print(f"Initial energy: {energy0_ev/1e6:.3f} MeV = {energy0:.6e} J")
 proc0_print(f"H_stop:         {H_stop_ev/1e6:.3f} MeV = {H_stop:.6e} J")
-proc0_print(f"nu_s:           {nu_s:.6e} 1/s")
-proc0_print(f"required backward elapsed time to hit H_stop ≈ {required_backward_time:.6e} s")
-proc0_print(f"tmax_forward:   {tmax_forward:.6e} s")
-proc0_print(f"tmax_backward:  {tmax_backward:.6e} s")
 
 
 # =============================================================================
@@ -150,6 +146,10 @@ nu_s = 1.0 / tau_s
 required_backward_time = np.log(H_stop / energy0) / nu_s
 tmax_forward = 2.0e-6
 tmax_backward = max(1.2 * required_backward_time, 2.0e-6)
+
+proc0_print(f"required backward elapsed time to hit H_stop ≈ {required_backward_time:.6e} s")
+proc0_print(f"tmax_forward:   {tmax_forward:.6e} s")
+proc0_print(f"tmax_backward:  {tmax_backward:.6e} s")
 
 def run_cartesian_drag(
     tracer,
