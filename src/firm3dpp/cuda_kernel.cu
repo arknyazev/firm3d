@@ -1385,8 +1385,24 @@ __device__ void adjust_time_cartesian_drag(
         // Forward energy stop
         if constexpr (id == RHS::GC_CartesianDragForward){
             if(use_energy_stop_d){
-                double H_now = state[4 * PARTICLES_PER_BLOCK + threadIdx.x];
-                if(H_now <= H_stop_d){
+                double H_prev = old_state_local[4];
+                double H_new  = new_state_local[4];
+        
+                if(H_prev > H_stop_d && H_new <= H_stop_d){
+                    double denom = H_new - H_prev;
+                    double alpha = (fabs(denom) > 1e-30) ? (H_stop_d - H_prev) / denom : 1.0;
+                    alpha = fmin(fmax(alpha, 0.0), 1.0);
+        
+                    for(int i = 0; i < 5; ++i){
+                        state[i * PARTICLES_PER_BLOCK + threadIdx.x] =
+                            old_state_local[i] + alpha * (new_state_local[i] - old_state_local[i]);
+                    }
+        
+                    t[threadIdx.x] = old_t_local + alpha * (new_t_local - old_t_local);
+        
+                    // force exact threshold value
+                    state[4 * PARTICLES_PER_BLOCK + threadIdx.x] = H_stop_d;
+        
                     hit_energy_stop[threadIdx.x] = true;
                     stop_reason[threadIdx.x] = 2;
                     dt[threadIdx.x] = 0.0;
@@ -2236,6 +2252,9 @@ extern "C" py::array_t<double> test_gpu_interpolation(py::array_t<double> quad_p
         n = 10;
     } else if(rhs == "boozer"){
         n = 12;
+    // NEW BY MARIA
+    } else if(rhs == "cartesian_drag"){
+        n = 9;
     }
 
     // allocate and copy to device memory
@@ -2286,6 +2305,8 @@ extern "C" py::array_t<double> test_gpu_interpolation(py::array_t<double> quad_p
         test_gpu_interpolation_kernel<RHS::GC_BoozerVacuumSAW, 10><<<nblks, nthreads>>>(quadpts_d, loc_d, out_d, n_points);
     } else if(rhs == "boozer") {
         test_gpu_interpolation_kernel<RHS::GC_Boozer, 12><<<nblks, nthreads>>>(quadpts_d, loc_d, out_d, n_points);
+    } else if(rhs == "cartesian_drag") {
+        test_gpu_interpolation_kernel<RHS::GC_CartesianDragForward, 9><<<nblks, nthreads>>>(quadpts_d, loc_d, out_d, n_points);
     }
     double out[n*n_points];
     gpuErrchk( cudaMemcpy(&out, out_d, n*n_points * sizeof(double), cudaMemcpyDeviceToHost) );

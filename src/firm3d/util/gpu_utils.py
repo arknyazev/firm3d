@@ -219,7 +219,9 @@ def cartesian_interpolant(field, sc_particle, nfp, n_metagrid_pts):
     B = field.B_cyl()
     GradAbsB = field.GradAbsB_cyl()
 
-    signed_dist_vals = sc_particle.evaluate_rphiz(quad_pts)
+    #signed_dist_vals = sc_particle.evaluate_rphiz(quad_pts)
+    # NEW BY MARIA instead of line above to avoid shape issues
+    signed_dist_vals = np.asarray(sc_particle.evaluate_rphiz(quad_pts), dtype=np.float64).reshape(-1, 1)
 
     quad_info = np.hstack((B, GradAbsB, signed_dist_vals))
 
@@ -306,7 +308,10 @@ def cartesian_interpolant_drag(field, sc_particle, ne_fun, Te_fun, nfp, n_metagr
 
     B = field.B_cyl()
     GradAbsB = field.GradAbsB_cyl()
-    signed_dist_vals = sc_particle.evaluate_rphiz(quad_pts)
+    #signed_dist_vals = sc_particle.evaluate_rphiz(quad_pts)
+    # NEW BY MARIA instead of line above to avoid shape issues
+    signed_dist_vals = np.asarray(sc_particle.evaluate_rphiz(quad_pts), dtype=np.float64).reshape(-1, 1)
+
 
     ne_vals = np.asarray(ne_fun(quad_pts), dtype=np.float64).reshape(-1, 1)
     Te_vals = np.asarray(Te_fun(quad_pts), dtype=np.float64).reshape(-1, 1)
