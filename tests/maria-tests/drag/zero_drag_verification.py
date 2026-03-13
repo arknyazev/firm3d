@@ -81,8 +81,6 @@ timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 out_dir = script_dir / "outputs_drag_zero_regression" / timestamp
 out_dir.mkdir(parents=True, exist_ok=True)
 
-proc0_print("Running drag_zero_regression_cartesian.py")
-proc0_print("========================================")
 proc0_print(f"Saving outputs to: {out_dir}")
 
 
@@ -513,7 +511,7 @@ for tol in tol_vals:
 
         vac = run_cartesian_vacuum(
             cartesian_gpu_tracing_backward,
-            cell_quad_pts,
+            cell_quad_pts_vac,
             r_range,
             phi_range,
             z_range,
@@ -529,7 +527,7 @@ for tol in tol_vals:
 
         drag = run_cartesian_drag(
             cartesian_gpu_tracing_backward_drag,
-            cell_quad_pts,
+            cell_quad_pts_drag,
             r_range,
             phi_range,
             z_range,

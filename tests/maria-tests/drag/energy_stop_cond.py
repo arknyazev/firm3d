@@ -63,17 +63,14 @@ H_stop = H_stop_ev * ONE_EV       # joules
 coulomb_log = 17.0
 Te_in_eV = True
 
+ne0 = 5e19          # m^-3
+Te0_ev = 5e3        # eV
+
 # tracing / numerical params
 tol = 1e-10
 seed = 1
 degree = 3
 n = 16
-
-# choose tmax so backward run has time to reach H_stop
-# needed elapsed time is ln(H_stop/H0)/nu_s
-required_backward_time = np.log(H_stop / energy0) / nu_s
-tmax_forward = 2.0e-6
-tmax_backward = max(1.2 * required_backward_time, 2.0e-6)
 
 # numerical tolerances for invariant checks
 abs_tol_log = 5e-7
@@ -149,6 +146,10 @@ def slowing_down_time_si(ne, Te_raw, mass, coulomb_log, Te_in_eV=True):
 
 tau_s = slowing_down_time_si(ne0, Te0_ev, mass, coulomb_log, Te_in_eV=True)
 nu_s = 1.0 / tau_s
+
+required_backward_time = np.log(H_stop / energy0) / nu_s
+tmax_forward = 2.0e-6
+tmax_backward = max(1.2 * required_backward_time, 2.0e-6)
 
 def run_cartesian_drag(
     tracer,
@@ -483,10 +484,9 @@ proc0_print(f"Particles hitting energy stop: {n_hit_energy}/{nparticles}")
 
 # consistency checks for those that hit stop
 if n_hit_energy > 0:
-    # Since stop is checked after an accepted step, final H may be slightly above threshold.
-    at_or_above = np.all(H_s[hit_energy] >= H_stop)
-    proc0_print(f"All energy-stopped particles satisfy H_final >= H_stop: {at_or_above}")
-    assert at_or_above, "Some particles reported energy-stop but final H < H_stop."
+    hit_exact = np.allclose(H_s[hit_energy], H_stop, atol=abs_tol_H, rtol=rel_tol_H)
+    proc0_print(f"All energy-stopped particles satisfy H_final ~= H_stop: {hit_exact}")
+    assert hit_exact, "Some particles reported energy-stop but final H is not at H_stop."
 
 # particles that did not hit stop should have reached tmax or wall
 non_energy = ~hit_energy

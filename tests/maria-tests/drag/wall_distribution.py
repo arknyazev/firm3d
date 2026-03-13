@@ -176,19 +176,29 @@ sc_particle = SurfaceClassifier(surface, h=0.1, p=2)
 rs = np.linalg.norm(surface.gamma()[:, :, 0:2], axis=2)
 zs = surface.gamma()[:, :, 2]
 
-rrange = (np.min(rs), np.max(rs), n)
-phirange = (0, 2 * np.pi / nfp, n * 2)
-zrange = (np.min(zs), np.max(zs), n)
+r_range = (np.min(rs), np.max(rs), n)
+phi_range = (0, 2 * np.pi / nfp, n * 2)
+z_range = (np.min(zs), np.max(zs), n)
 
 bsh = InterpolatedField(
     bs,
     degree,
-    rrange,
-    phirange,
-    zrange,
+    r_range,
+    phi_range,
+    z_range,
     True,
     nfp=nfp,
     stellsym=True,
+)
+
+
+r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
+    field=bsh,
+    sc_particle=sc_particle,
+    ne_fun=ne_field,
+    Te_fun=Te_field,
+    nfp=nfp,
+    n_metagrid_pts=n,
 )
 
 # ============================================================================

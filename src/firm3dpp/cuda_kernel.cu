@@ -129,8 +129,7 @@ __device__ inline double slowing_down_time_si(double ne, double Te_raw){
     const double e_ch = 1.602176634e-19;       // C
     const double m_e  = 9.1093837015e-31;      // kg
 
-    // Fast-ion species parameters (should this be configurable ..?)
-    const double Z_alpha = 2.0;
+    double Z_fast = fmax(fabs(charge_d) / e_ch, 1e-12);
 
     double Te_J = Te_raw * Te_unit_d;
 
@@ -1547,6 +1546,37 @@ __global__ void particle_trace_kernel_cartesian_drag(
     );
     __syncthreads();
 
+    if(is_valid){
+        double vpar0 = state[3 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double H0    = state[4 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double Kpar0 = 0.5 * mass_d * vpar0 * vpar0;
+    
+        // neg - invalid initial energy state
+        if(H0 < 0.0 || H0 < Kpar0){
+            hit_energy_stop[threadIdx.x] = true;
+            stop_reason[threadIdx.x] = 3;
+            dt[threadIdx.x] = 0.0;
+        }
+    
+        // already at/through stopping threshold
+        if(use_energy_stop_d && !hit_energy_stop[threadIdx.x]){
+            if constexpr (id == RHS::GC_CartesianDragForward){
+                if(H0 <= H_stop_d){
+                    hit_energy_stop[threadIdx.x] = true;
+                    stop_reason[threadIdx.x] = 2;
+                    dt[threadIdx.x] = 0.0;
+                }
+            } else if constexpr (id == RHS::GC_CartesianDragBackward){
+                if(H0 >= H_stop_d){
+                    hit_energy_stop[threadIdx.x] = true;
+                    stop_reason[threadIdx.x] = 2;
+                    dt[threadIdx.x] = 0.0;
+                }
+            }
+        }
+    }
+    __syncthreads();
+
     while(__syncthreads_count(
         is_valid &&
         !(t[threadIdx.x] >= tmax_d || has_left[threadIdx.x] || hit_energy_stop[threadIdx.x])
@@ -2231,7 +2261,7 @@ extern "C" py::array_t<double> test_gpu_interpolation(py::array_t<double> quad_p
 
     // map input data
     // Cartesian Coordinates
-    if(rhs == "cartesian_vacuum"){
+    if(rhs == "cartesian_vacuum" || rhs == "cartesian_drag"){
         for(int i=0; i<n_points; ++i){
             double x = loc_arr[3*i] * cos(loc_arr[3*i + 1]);
             double y = loc_arr[3*i] * sin(loc_arr[3*i + 1]);
