@@ -91,10 +91,6 @@ def total_speed_from_H(H, m):
 
 
 def sample_wall_points(surface, nparticles, rng):
-    """
-    Simple approximate sampling on surface parameter grid.
-    Replace with a better area-weighted sampler later if you want.
-    """
     gamma = surface.gamma().reshape(-1, 3)
     idx = rng.integers(0, gamma.shape[0], size=nparticles)
     return gamma[idx]
@@ -103,12 +99,17 @@ def sample_wall_points(surface, nparticles, rng):
 def birth_source_placeholder(xyz):
     """
     Placeholder source S(r_birth).
-    Replace with actual fusion birth rate.
-    Here: smooth radial weighting just for visualization.
     """
     R = np.sqrt(xyz[:, 0] ** 2 + xyz[:, 1] ** 2)
     Z = xyz[:, 2]
     return np.exp(-((R - np.mean(R)) ** 2) / (2 * (0.15 ** 2))) * np.exp(-(Z ** 2) / (2 * (0.15 ** 2)))
+
+
+def ne_field(rphiz):
+    return np.full(rphiz.shape[0], 5e19)
+
+def Te_field(rphiz):
+    return np.full(rphiz.shape[0], 5e3)
 
 
 def run_backward_drag(
@@ -189,23 +190,6 @@ bsh = InterpolatedField(
     nfp=nfp,
     stellsym=True,
 )
-
-# --------------------------------------------------------------------------
-# Replace these with your actual ne/Te fields.
-# They must accept xyz[:,3] and return arrays of length N.
-# --------------------------------------------------------------------------
-def ne_field(xyz):
-    # [m^-3]
-    return np.full(xyz.shape[0], 5e19)
-
-def Te_field(xyz):
-    # [eV] here, because we set Te_in_eV=True
-    return np.full(xyz.shape[0], 5e3)
-
-r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
-    bsh, sc_particle, ne_field, Te_field, nfp, n
-)
-
 
 # ============================================================================
 # Initial wall distribution

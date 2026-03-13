@@ -19,14 +19,6 @@ This script does two things:
 2) Backward tracing with energy stopping enabled:
    stop when H >= H_stop
 
-NEED TO ADD r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
-    field=bsh,
-    sc_particle=sc_particle,
-    ne_fun=ne_fun,
-    Te_fun=Te_fun,
-    nfp=nfp,
-    n_metagrid_pts=n,
-) CORRECTLY HERE FOR VACUUM VS DRAG OPTIONS
 """
 
 import csv
@@ -44,7 +36,7 @@ from simsopt.util import proc0_print
 from simsopt.util.constants import PROTON_MASS, ELEMENTARY_CHARGE, ONE_EV
 from simsopt.field.sampling import draw_uniform_on_curve
 
-from firm3d.util.gpu_utils import cartesian_interpolant
+from firm3d.util.gpu_utils import cartesian_interpolant_drag
 from firm3dpp import (
     cartesian_gpu_tracing_drag,
     cartesian_gpu_tracing_backward_drag,
@@ -136,6 +128,28 @@ def save_csv(path, rows):
         writer.writerows(rows)
 
 
+def ne_fun(rphiz):
+    return np.full(rphiz.shape[0], ne0, dtype=np.float64)
+
+def Te_fun(rphiz):
+    return np.full(rphiz.shape[0], Te0_ev, dtype=np.float64)
+
+
+def slowing_down_time_si(ne, Te_raw, mass, coulomb_log, Te_in_eV=True):
+    eps0 = 8.8541878128e-12
+    e_ch = 1.602176634e-19
+    m_e  = 9.1093837015e-31
+    Z_alpha = 2.0
+
+    Te_J = Te_raw * e_ch if Te_in_eV else Te_raw
+
+    numerator = 3.0 * (2.0 * np.pi) ** 1.5 * eps0**2 * mass * Te_J ** 1.5
+    denominator = Z_alpha**2 * e_ch**4 * np.sqrt(m_e) * ne * coulomb_log
+    return numerator / denominator
+
+tau_s = slowing_down_time_si(ne0, Te0_ev, mass, coulomb_log, Te_in_eV=True)
+nu_s = 1.0 / tau_s
+
 def run_cartesian_drag(
     tracer,
     cell_quad_pts_drag,
@@ -152,7 +166,9 @@ def run_cartesian_drag(
     Te_in_eV,
     tmax,
     tol,
+    nparticles,
     H_stop,
+    use_energy_stop,
 ):
     out = tracer(
         cell_quad_pts_drag,
@@ -169,12 +185,11 @@ def run_cartesian_drag(
         bool(Te_in_eV),
         float(tmax),
         float(tol),
-        int(len(H_init)),
+        int(nparticles),
         float(H_stop),
-        True,
+        bool(use_energy_stop),
     )
-    return np.asarray(out, dtype=np.float64).reshape(len(H_init), 7)
-
+    return np.asarray(out, dtype=np.float64).reshape(int(nparticles), 7)
 
 # =============================================================================
 # Build magnetic field and interpolant
@@ -232,7 +247,14 @@ proc0_print("Error in B:      ", bsh.estimate_error_B(1000), flush=True)
 proc0_print("Error in GradAbsB:", bsh.estimate_error_GradAbsB(1000), flush=True)
 
 t1 = time.time()
-r_range, phi_range, z_range, cell_quad_pts = cartesian_interpolant(bsh, sc_particle, nfp, n)
+r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
+    field=bsh,
+    sc_particle=sc_particle,
+    ne_fun=ne_fun,
+    Te_fun=Te_fun,
+    nfp=nfp,
+    n_metagrid_pts=n,
+)
 t2 = time.time()
 proc0_print(f"GPU interpolant built in {t2 - t1:.3f}s", flush=True)
 
@@ -286,7 +308,7 @@ proc0_print("--------------------------------------------------------")
 
 fwd = run_cartesian_drag(
     cartesian_gpu_tracing_drag,
-    cell_quad_pts,
+    cell_quad_pts_drag,
     r_range,
     phi_range,
     z_range,
@@ -308,7 +330,7 @@ fwd = run_cartesian_drag(
 
 bwd = run_cartesian_drag(
     cartesian_gpu_tracing_backward_drag,
-    cell_quad_pts,
+    cell_quad_pts_drag,
     r_range,
     phi_range,
     z_range,
@@ -333,11 +355,11 @@ np.save(out_dir / "backward_no_stop.npy", bwd)
 # unpack
 t_f = fwd[:, 0]
 H_f = fwd[:, 5]
-stop_f = fwd[:, 7].astype(int)
+stop_f = fwd[:, 6].astype(int)
 
 t_b = bwd[:, 0]
 H_b = bwd[:, 5]
-stop_b = bwd[:, 7].astype(int)
+stop_b = bwd[:, 6].astype(int)
 
 # monotonic direction checks
 forward_should_decrease = np.all(H_f < H_init)
@@ -418,7 +440,7 @@ proc0_print("-----------------------------------------------")
 
 bwd_stop = run_cartesian_drag(
     cartesian_gpu_tracing_backward_drag,
-    cell_quad_pts,
+    cell_quad_pts_drag,
     r_range,
     phi_range,
     z_range,
@@ -438,7 +460,7 @@ bwd_stop = run_cartesian_drag(
 )
 
 H_final = bwd_stop[:, 5]
-stop_codes = bwd_stop[:, 7].astype(int) # should be 6?
+stop_codes = bwd_stop[:, 6].astype(int)
 
 print("max final H [MeV] =", np.max(H_final) / ONE_EV / 1e6)
 print("target H_stop [MeV] =", H_stop / ONE_EV / 1e6)

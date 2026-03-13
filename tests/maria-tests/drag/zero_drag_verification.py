@@ -5,14 +5,6 @@ Verify that when nu_s = 0 and Q0=0 and energy stopping is disabled (use_energy_s
 tracers reproduce the existing vacuum Cartesian tracers.
 (both forward and backward)
 
-NEED TO ADD r_range, phi_range, z_range, cell_quad_pts_drag = cartesian_interpolant_drag(
-    field=bsh,
-    sc_particle=sc_particle,
-    ne_fun=ne_fun,
-    Te_fun=Te_fun,
-    nfp=nfp,
-    n_metagrid_pts=n,
-) CORRECTLY HERE FOR VACUUM VS DRAG OPTIONS
 """
 
 import csv
@@ -31,7 +23,7 @@ from simsopt.util import proc0_print
 from simsopt.util.constants import PROTON_MASS, ELEMENTARY_CHARGE, ONE_EV
 from simsopt.field.sampling import draw_uniform_on_curve
 
-from firm3d.util.gpu_utils import cartesian_interpolant
+from firm3d.util.gpu_utils import cartesian_interpolant, cartesian_interpolant_drag
 from firm3dpp import (
     cartesian_gpu_tracing,
     cartesian_gpu_tracing_backward,
@@ -140,6 +132,13 @@ def save_csv_row(csv_path: Path, row: dict):
         if not file_exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+def ne_fun(rphiz):
+    return np.zeros(rphiz.shape[0], dtype=np.float64)
+
+def Te_fun(rphiz):
+    return np.full(rphiz.shape[0], 1.0, dtype=np.float64)
 
 
 def run_cartesian_vacuum(
@@ -294,10 +293,23 @@ proc0_print("Error in B:      ", bsh.estimate_error_B(1000), flush=True)
 proc0_print("Error in GradAbsB:", bsh.estimate_error_GradAbsB(1000), flush=True)
 
 t1 = time.time()
-r_range, phi_range, z_range, cell_quad_pts = cartesian_interpolant(bsh, sc_particle, nfp, n)
-
+r_range, phi_range, z_range, cell_quad_pts_vac = cartesian_interpolant(
+    bsh, sc_particle, nfp, n
+)
+r_range_drag, phi_range_drag, z_range_drag, cell_quad_pts_drag = cartesian_interpolant_drag(
+    field=bsh,
+    sc_particle=sc_particle,
+    ne_fun=ne_fun,
+    Te_fun=Te_fun,
+    nfp=nfp,
+    n_metagrid_pts=n,
+)
 t2 = time.time()
-proc0_print(f"GPU interpolant built in {t2 - t1:.3f}s", flush=True)
+proc0_print(f"GPU interpolants built in {t2 - t1:.3f}s", flush=True)
+
+assert np.allclose(np.array(r_range, dtype=np.float64), np.array(r_range_drag, dtype=np.float64))
+assert np.allclose(np.array(phi_range, dtype=np.float64), np.array(phi_range_drag, dtype=np.float64))
+assert np.allclose(np.array(z_range, dtype=np.float64), np.array(z_range_drag, dtype=np.float64))
 
 
 # =============================================================================
@@ -365,7 +377,7 @@ for tol in tol_vals:
 
         vac = run_cartesian_vacuum(
             cartesian_gpu_tracing,
-            cell_quad_pts,
+            cell_quad_pts_vac,
             r_range,
             phi_range,
             z_range,
@@ -381,7 +393,7 @@ for tol in tol_vals:
 
         drag = run_cartesian_drag(
             cartesian_gpu_tracing_drag,
-            cell_quad_pts,
+            cell_quad_pts_drag,
             r_range,
             phi_range,
             z_range,
