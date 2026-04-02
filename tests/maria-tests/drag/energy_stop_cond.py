@@ -33,7 +33,10 @@ from simsopt.configs import get_data
 from simsopt.field import InterpolatedField, SurfaceClassifier
 from simsopt.geo import SurfaceRZFourier, curves_to_vtk
 from simsopt.util import proc0_print
-from simsopt.util.constants import PROTON_MASS, ELEMENTARY_CHARGE, ONE_EV
+from simsopt.util.constants import (
+    ALPHA_PARTICLE_CHARGE  as CHARGE,
+    ALPHA_PARTICLE_MASS    as MASS, 
+    ONE_EV)
 from simsopt.field.sampling import draw_uniform_on_curve
 
 from firm3d.util.gpu_utils import cartesian_interpolant_drag
@@ -48,8 +51,8 @@ from firm3dpp import (
 # =============================================================================
 
 nparticles = 8
-mass = PROTON_MASS
-charge = ELEMENTARY_CHARGE
+mass = MASS
+charge = CHARGE
 
 # Initial particle energy
 energy0_ev = 0.5e6                # 0.5 MeV
