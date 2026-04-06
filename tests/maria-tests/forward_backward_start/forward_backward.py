@@ -9,7 +9,10 @@ from simsopt.configs import get_data
 from simsopt.field import InterpolatedField, SurfaceClassifier
 from simsopt.geo import SurfaceRZFourier, curves_to_vtk
 from simsopt.util import proc0_print
-from simsopt.util.constants import PROTON_MASS, ELEMENTARY_CHARGE, ONE_EV
+from simsopt.util.constants import (
+    ALPHA_PARTICLE_CHARGE  as CHARGE,
+    ALPHA_PARTICLE_MASS    as MASS,
+    ONE_EV)
 from simsopt.field.sampling import draw_uniform_on_curve
 
 from firm3d.util.gpu_utils import cartesian_interpolant
@@ -23,8 +26,8 @@ from firm3dpp import cartesian_gpu_tracing, cartesian_gpu_tracing_backward
 # Particle parameters:
 nparticles = 1 # number of particles to trace
 energy = 500 * ONE_EV # kinetic energy of particles [J]
-mass = PROTON_MASS  # mass of particles [kg]
-charge = ELEMENTARY_CHARGE # charge of particles [C]
+mass = MASS  # mass of particles [kg]
+charge = CHARGE # charge of particles [C]
 
 tmax_values = np.arange(1e-7, 1e-5 + 1e-7, 1e-7) # trajectory snapshots [s]
 tmax_max = float(np.max(tmax_values))
