@@ -18,7 +18,10 @@ import matplotlib.pyplot as plt
 from simsopt.configs import get_data
 from simsopt.field import InterpolatedField, SurfaceClassifier
 from simsopt.geo import SurfaceRZFourier
-from simsopt.util.constants import PROTON_MASS, ELEMENTARY_CHARGE, ONE_EV
+from simsopt.util.constants import (
+    ALPHA_PARTICLE_CHARGE  as CHARGE,
+    ALPHA_PARTICLE_MASS    as MASS, 
+    ONE_EV)
 
 from firm3d.util.gpu_utils import cartesian_interpolant_drag   # <- new function
 from firm3dpp import cartesian_gpu_tracing_backward_drag
@@ -31,8 +34,8 @@ from firm3dpp import cartesian_gpu_tracing_backward_drag
 nparticles = 10     # INCREASE THIS
 seed = 7
 
-mass = PROTON_MASS
-charge = ELEMENTARY_CHARGE
+mass = MASS
+charge = CHARGE
 
 H0 = 3.5e6 * ONE_EV        # birth energy [J]
 H_low = 0.3e6 * ONE_EV     # wall-energy sampling lower bound [J]
