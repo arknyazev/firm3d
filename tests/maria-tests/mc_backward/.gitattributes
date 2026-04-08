@@ -1,7 +1,2 @@
-*.nc filter=lfs diff=lfs merge=lfs -text
-1_IC_sample_1e6_points/outputs/*.txt filter=lfs diff=lfs merge=lfs -text
 2_tracing_gpu/output/*.npy filter=lfs diff=lfs merge=lfs -text
 2_tracing_gpu/output/*.vtu filter=lfs diff=lfs merge=lfs -text
-3_IC_sample_wall/outputs/*.txt filter=lfs diff=lfs merge=lfs -text
-3_IC_sample_wall/outputs/*.npy filter=lfs diff=lfs merge=lfs -text
-3_IC_sample_wall/outputs/*.vtu filter=lfs diff=lfs merge=lfs -text
