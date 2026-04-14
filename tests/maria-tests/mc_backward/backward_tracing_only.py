@@ -129,7 +129,7 @@ class Inputs:
     tol:            float = 1e-9
     seed:           int   = 57
 
-    # Finite-difference step [m] used to get outward normal via ∇(signed distance)
+    # Finite-difference step for outward normal
     normal_fd_eps: float = 1e-4
 
 
@@ -227,7 +227,7 @@ def write_points_vtu(filename, xyz, point_data=None):
     print(f"  wrote {filename.name} ({npts} points)")
 
 
-# Fusion reactivity (for a reference p_0(s) histogram overlay)
+# Fusion reactivity
 def sigmav(T_keV):
     if T_keV > 0:
         return T_keV ** (-2/3) * np.exp(-19.94 * T_keV ** (-1/3))
@@ -297,7 +297,7 @@ rng = np.random.default_rng(inp.seed)
 idx = rng.choice(n_avail, size=n_wall, replace=False)
 R_wall, phi_wall, Z_wall = R_all[idx], phi_all[idx], Z_all[idx]
 
-# Drop points outside the LCFS
+# Drop points outside the LCFS (?)
 """
 sd = sc_particle.evaluate_rphiz(
     np.column_stack([R_wall, phi_wall, Z_wall])
@@ -447,7 +447,7 @@ np.save(out_dir / "backward_results.npy", bwd)
 stop_codes = bwd[:, 6].astype(int)
 print(f"  stop codes: {summarize_stop_codes(stop_codes)}")
 
-# Per-category final energy statistics [MeV].
+# Per-category final energy statistics [MeV]
 _H_final_all = bwd[:, 5]
 _label = {0: "tmax", 1: "wall", 2: "H_fusion", 3: "invalid"}
 print("\n  Final-energy stats per stop-code category [MeV]:")
@@ -472,7 +472,6 @@ for code in sorted(np.unique(stop_codes)):
           f"{row['H_mean_MeV']:>10.4f}{row['H_median_MeV']:>10.4f}"
           f"{row['H_std_MeV']:>10.4f}")
 
-# Also dump as CSV for later analysis.
 with open(out_dir / "final_energy_stats.csv", "w", newline="") as f:
     if H_stats_rows:
         writer = csv.DictWriter(f, fieldnames=list(H_stats_rows[0].keys()))
@@ -513,7 +512,6 @@ birth_rphiz = np.column_stack([R_b, phi_b, Z_b])
 np.save(out_dir / "birth_endpoints.npy", birth_xyz)
 np.save(out_dir / "birth_endpoints_rphiz.npy", birth_rphiz)
 
-# Convert to Boozer via BOOZ_XFORM field
 print("  building Boozer interpolant + converting to Boozer...")
 bri = BoozerRadialInterpolant(str(inp.boozmn_file), inp.radial_order, no_K=True)
 boozer_field = InterpolatedBoozerField(
@@ -523,7 +521,7 @@ boozer_field = InterpolatedBoozerField(
     nzeta_interp=inp.boozer_res,
 )
 # Root finder raises if a single point fails to converge (e.g. numerically
-# outside the Boozer s∈[0,1] domain).  Fall back to per-point try/except so
+# outside the Boozer s \in [0,1] domain).  Fall back to per-point try/except so
 # failures mark the endpoint invalid instead of aborting the whole run.
 try:
     boozer_coords = cylindrical_to_boozer(boozer_field, birth_rphiz)
