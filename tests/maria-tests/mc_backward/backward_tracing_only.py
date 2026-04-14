@@ -124,6 +124,11 @@ class Inputs:
 
     # Tracing
     n_wall:         int   = 10_000_000  # same as in IC file from folder 3_
+    # Subsample of successful (stop_code==2) particles to re-trace with
+    # snapshots to save real time-resolved trajectories.  Kept far smaller
+    # than n_wall because each snapshot re-runs the tracer from t=0.
+    n_trajectory:   int   = 200
+    n_snapshots:    int   = 100
     # tmax_backward is recomputed below from slowing-down time and H range
     tmax_backward:  float = 5e-5
     tol:            float = 1e-9
@@ -520,25 +525,69 @@ boozer_field = InterpolatedBoozerField(
     ntheta_interp=inp.boozer_res,
     nzeta_interp=inp.boozer_res,
 )
-# Root finder raises if a single point fails to converge (e.g. numerically
-# outside the Boozer s \in [0,1] domain).  Fall back to per-point try/except so
-# failures mark the endpoint invalid instead of aborting the whole run.
-try:
-    boozer_coords = cylindrical_to_boozer(boozer_field, birth_rphiz)
-    n_failed_bz = 0
-except RuntimeError as exc:
-    print(f"  batched cylindrical_to_boozer failed ({exc}); falling back per-point")
-    boozer_coords = np.full_like(birth_rphiz, np.nan)
-    n_failed_bz = 0
-    for i in range(birth_rphiz.shape[0]):
-        try:
-            boozer_coords[i] = cylindrical_to_boozer(
-                boozer_field, birth_rphiz[i:i+1]
-            )[0]
-        except RuntimeError:
-            n_failed_bz += 1
-    if n_failed_bz:
-        print(f"  {n_failed_bz}/{birth_rphiz.shape[0]} endpoints failed Boozer conversion")
+# cylindrical_to_boozer raises a RuntimeError as soon as ONE point in the batch
+# fails (e.g. it sits numerically outside the Boozer s in [0,1] domain).  With
+# 1e6 birth endpoints, the previous per-point fallback was unusably slow.
+#
+# Strategy:
+#   (a) Drop points already known to be outside the LCFS via sc_particle —
+#       they cannot have a valid Boozer s and don't need to be inverted.
+#   (b) Convert the remainder in chunks; on a chunk failure, recursively split
+#       the chunk in half. Only chunks that bottom-out at a single bad point
+#       pay the per-point cost. This is O(N + B log C) with tiny B in practice.
+
+boozer_coords = np.full_like(birth_rphiz, np.nan)
+n_failed_bz = 0
+
+# (a) Cheap LCFS pre-filter on birth endpoints
+sd_birth = sc_particle.evaluate_rphiz(birth_rphiz).ravel()
+inside_birth = sd_birth >= 0
+n_outside_birth = int((~inside_birth).sum())
+if n_outside_birth:
+    print(f"  {n_outside_birth}/{M} birth endpoints lie outside LCFS — "
+          f"skipping Boozer conversion for these")
+inside_idx = np.where(inside_birth)[0]
+to_convert = birth_rphiz[inside_idx]
+
+# (b) Chunked conversion with recursive subdivision on failure
+def _convert_chunked(field, pts, idx_global, chunk=10_000):
+    """Fill boozer_coords[idx_global] in-place; return number of failures."""
+    failed = 0
+    n = len(pts)
+    starts = range(0, n, chunk)
+    t_chunk0 = time.time()
+    done = 0
+    for s in starts:
+        e = min(s + chunk, n)
+        sub_pts = pts[s:e]
+        sub_idx = idx_global[s:e]
+        failed += _convert_recurse(field, sub_pts, sub_idx)
+        done += (e - s)
+        if done % (10 * chunk) == 0 or e == n:
+            print(f"    Boozer convert: {done}/{n}  "
+                  f"(elapsed {time.time()-t_chunk0:.1f}s, failures so far {failed})")
+    return failed
+
+def _convert_recurse(field, pts, idx_global):
+    """Try to convert a contiguous block; recurse on failure."""
+    if len(pts) == 0:
+        return 0
+    try:
+        out = cylindrical_to_boozer(field, pts)
+        boozer_coords[idx_global] = out
+        return 0
+    except RuntimeError:
+        if len(pts) == 1:
+            return 1
+        mid = len(pts) // 2
+        return (_convert_recurse(field, pts[:mid], idx_global[:mid]) +
+                _convert_recurse(field, pts[mid:], idx_global[mid:]))
+
+print(f"  converting {len(to_convert)} inside-LCFS endpoints to Boozer...")
+t_bz = time.time()
+n_failed_bz = _convert_chunked(boozer_field, to_convert, inside_idx)
+print(f"  Boozer conversion done in {time.time()-t_bz:.1f}s; "
+      f"failures: {n_failed_bz}/{len(to_convert)}")
 
 s_b = boozer_coords[:, 0]
 np.save(out_dir / "birth_endpoints_boozer.npy", boozer_coords)
@@ -624,6 +673,79 @@ ET.indent(tree, space="  ")
 tree.write(str(out_dir / "trajectory_segments.vtu"),
            encoding="utf-8", xml_declaration=True)
 print(f"  wrote trajectory_segments.vtu ({M} segments)")
+
+
+# ── Step 5b: full time-resolved trajectories for a subsample of successes ────
+# Re-run the backward tracer for a small subsample of particles that reached
+# H_fusion (stop_code == 2), sweeping tmax from ~0 up to inp.tmax_backward.
+# Each call returns the end state at that tmax; stacking across calls yields a
+# (n_traj, n_snap, ...) trajectory array.  use_energy_stop stays True, so a
+# particle that hit H_fusion before a given snapshot's tmax remains frozen at
+# its birth endpoint for later snapshots (matches the segments output).
+
+print("\n--- STEP 5b: trajectory snapshots for subsample of successes ---")
+n_traj = int(min(inp.n_trajectory, M))
+if n_traj == 0:
+    print("  no successful particles; skipping trajectory save")
+else:
+    success_idx = np.flatnonzero(hit_fusion)
+    traj_sel = rng.choice(success_idx, size=n_traj, replace=False)
+
+    stz_traj = np.empty(3 * n_traj, dtype=np.float64)
+    stz_traj[0::3] = R_wall[traj_sel]
+    stz_traj[1::3] = phi_wall[traj_sel]
+    stz_traj[2::3] = Z_wall[traj_sel]
+    vtang_traj = vtang_w[traj_sel]
+    H_traj     = H_wall[traj_sel]
+
+    tmax_snaps = np.linspace(
+        inp.tmax_backward / inp.n_snapshots,
+        inp.tmax_backward,
+        inp.n_snapshots,
+    )
+
+    traj_xyz  = np.zeros((n_traj, inp.n_snapshots, 3), dtype=np.float64)
+    traj_vpar = np.zeros((n_traj, inp.n_snapshots),    dtype=np.float64)
+    traj_H    = np.zeros((n_traj, inp.n_snapshots),    dtype=np.float64)
+    traj_time = np.zeros((n_traj, inp.n_snapshots),    dtype=np.float64)
+    traj_stop = np.zeros((n_traj, inp.n_snapshots),    dtype=np.int32)
+
+    t0 = time.time()
+    for i, tmax_i in enumerate(tmax_snaps):
+        out_i = cartesian_gpu_tracing_backward_drag(
+            cell_quad_pts,
+            np.ascontiguousarray(r_range,   dtype=np.float64),
+            np.ascontiguousarray(phi_range, dtype=np.float64),
+            np.ascontiguousarray(z_range,   dtype=np.float64),
+            np.ascontiguousarray(stz_traj,  dtype=np.float64),
+            float(inp.mass), float(inp.charge), speed_ref,
+            np.ascontiguousarray(vtang_traj, dtype=np.float64),
+            np.ascontiguousarray(H_traj,     dtype=np.float64),
+            float(inp.coulomb_log), bool(inp.Te_in_eV),
+            float(tmax_i), float(inp.tol), int(n_traj),
+            float(inp.H_fusion),
+            True,
+        )
+        arr = np.asarray(out_i, dtype=np.float64).reshape(n_traj, 7)
+        traj_time[:, i]    = arr[:, 0]
+        traj_xyz[:, i, 0]  = arr[:, 1]
+        traj_xyz[:, i, 1]  = arr[:, 2]
+        traj_xyz[:, i, 2]  = arr[:, 3]
+        traj_vpar[:, i]    = arr[:, 4]
+        traj_H[:, i]       = arr[:, 5]
+        traj_stop[:, i]    = arr[:, 6].astype(np.int32)
+        print(f"  snapshot {i+1}/{inp.n_snapshots}  tmax={tmax_i:.3e}s")
+    print(f"  trajectory tracing done in {time.time()-t0:.2f}s")
+
+    np.save(out_dir / "trajectories_xyz.npy",        traj_xyz)
+    np.save(out_dir / "trajectories_vpar.npy",       traj_vpar)
+    np.save(out_dir / "trajectories_H.npy",          traj_H)
+    np.save(out_dir / "trajectories_time.npy",       traj_time)
+    np.save(out_dir / "trajectories_stop.npy",       traj_stop)
+    np.save(out_dir / "trajectories_tmax.npy",       tmax_snaps)
+    np.save(out_dir / "trajectories_sample_idx.npy", traj_sel)
+    print(f"  wrote trajectories_*.npy  "
+          f"(n_traj={n_traj}, n_snap={inp.n_snapshots})")
 
 
 # ── Step 6: matplotlib figures ──────────────────────────────────────────────
