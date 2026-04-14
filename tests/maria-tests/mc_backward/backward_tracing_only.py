@@ -94,7 +94,7 @@ class Inputs:
     current:    float = 1.27797548115612e7
     coil_order: int   = 20
 
-    # Interpolant grid (must match 2_tracing_gpu conventions)
+    # Interpolant grid (matching 2_tracing_gpu conventions)
     n_r:    int = 64
     n_phi:  int = 128
     n_z:    int = 64
@@ -106,16 +106,16 @@ class Inputs:
     sc_h: float = 0.05
     sc_p: int   = 2
 
-    # Boozer interpolant (for cylindrical_to_boozer)
+    # Boozer interpolant
     radial_order:    int = 3
     boozer_degree:   int = 3
     boozer_res:      int = 48
 
-    # Physics — energy sampling explicitly [3.0, 3.5] MeV per task spec
+    # [3.0, 3.5] MeV
     mass:        float = MASS
     charge:      float = CHARGE
     H_low:       float = 3.0e6 * ONE_EV
-    H_high:      float = H_FUSION          # 3.5 MeV — D-T alpha birth energy
+    H_high:      float = H_FUSION
     H_fusion:    float = H_FUSION
     coulomb_log: float = 17.0
     Te_in_eV:    bool  = True
@@ -140,7 +140,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 print(f"Writing outputs to {out_dir}")
 
 
-# ── Helpers (reused from backward_informed_mc / export_points_vtk style) ─────
+# ── Helpers (reusing from previous scripts) ─────
 
 def wrap_phi(phi, phi_min, phi_max):
     period = phi_max - phi_min
@@ -202,8 +202,7 @@ def write_points_vtu(filename, xyz, point_data=None):
     print(f"  wrote {filename.name} ({npts} points)")
 
 
-# Fusion reactivity (for a reference p_0(s) histogram overlay) —
-# identical to 1_IC_sample_1e6_points and backward_informed_mc.
+# Fusion reactivity (for a reference p_0(s) histogram overlay)
 def sigmav(T_keV):
     if T_keV > 0:
         return T_keV ** (-2/3) * np.exp(-19.94 * T_keV ** (-1/3))
@@ -218,8 +217,6 @@ def fusion_reactivity(s):
 
 
 # ── Build coils, surface, B, classifier, GPU interpolant ─────────────────────
-# Mirrors 2_tracing_gpu/tracing_gpu.py and backward_informed_mc.py.
-
 print("\nBuilding coils + field...")
 all_coils     = load_coils_from_makegrid_file(str(inp.coil_file), order=inp.coil_order)
 base_curves   = [all_coils[i].curve for i in range(inp.ncoils)]
@@ -264,7 +261,6 @@ print(f"GPU drag interpolant built in {time.time()-t0:.1f}s")
 
 print("\n--- STEP 1: load wall IC and sample pitch + energy ---")
 wall_ic = np.loadtxt(inp.wall_ic_file, comments="#")
-# Wall IC contains positions only (R, phi, Z) — per 3_IC_sample_wall script.
 R_all   = wall_ic[:, 0]
 phi_all = wall_ic[:, 1]
 Z_all   = wall_ic[:, 2]
@@ -276,7 +272,7 @@ rng = np.random.default_rng(inp.seed)
 idx = rng.choice(n_avail, size=n_wall, replace=False)
 R_wall, phi_wall, Z_wall = R_all[idx], phi_all[idx], Z_all[idx]
 
-# Drop points outside the LCFS (Boozer->cyl roundoff can nudge points out).
+# Drop points outside the LCFS
 sd = sc_particle.evaluate_rphiz(
     np.column_stack([R_wall, phi_wall, Z_wall])
 ).ravel()
@@ -289,13 +285,13 @@ if n_outside:
 
 phi_wall = wrap_phi(phi_wall, phi_min, phi_max)
 
-# Sample uniform pitch and uniform energy per task spec.
+# Sample uniform pitch and uniform energy
 lam_wall  = rng.uniform(-1.0, 1.0, size=n_wall)
 H_wall    = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
 vtang_w   = lam_wall * v_total_w
 
-# Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants.
+# Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants
 stz_init = np.empty(3 * n_wall, dtype=np.float64)
 stz_init[0::3] = R_wall
 stz_init[1::3] = phi_wall
@@ -370,7 +366,7 @@ birth_rphiz = np.column_stack([R_b, phi_b, Z_b])
 np.save(out_dir / "birth_endpoints.npy", birth_xyz)
 np.save(out_dir / "birth_endpoints_rphiz.npy", birth_rphiz)
 
-# Convert to Boozer via BOOZ_XFORM field.
+# Convert to Boozer via BOOZ_XFORM field
 print("  building Boozer interpolant + converting to Boozer...")
 bri = BoozerRadialInterpolant(str(inp.boozmn_file), inp.radial_order, no_K=True)
 boozer_field = InterpolatedBoozerField(
@@ -383,7 +379,7 @@ boozer_coords = cylindrical_to_boozer(boozer_field, birth_rphiz)
 s_b = boozer_coords[:, 0]
 np.save(out_dir / "birth_endpoints_boozer.npy", boozer_coords)
 
-# "Valid" Boozer coordinates == lies inside the plasma, s in [0, 1].
+# "Valid" Boozer coordinates == s in [0, 1]
 valid_bz = (s_b >= 0.0) & (s_b <= 1.0) & np.isfinite(s_b)
 M_valid = int(valid_bz.sum())
 frac_both = M_valid / n_wall
@@ -428,7 +424,7 @@ write_points_vtu(out_dir / "birth_endpoints_valid.vtu",
                  point_data={"s_boozer": s_b[valid_bz],
                              "vpar": vpar_b[valid_bz]})
 
-# Segments from wall start -> birth endpoint, one per successful particle.
+# Segments from wall start -> birth endpoint, one per successful particle
 wall_xyz_success = wall_xyz[hit_fusion]
 seg_pts = np.empty((2 * M, 3), dtype=np.float64)
 seg_pts[0::2] = wall_xyz_success
@@ -471,7 +467,7 @@ print(f"  wrote trajectory_segments.vtu ({M} segments)")
 print("\n--- STEP 6: plots ---")
 pdir = out_dir / "plots"
 
-# 1. Wall hits (starts) vs birth endpoints, top-down XY.
+# 1. Wall hits (starts) vs birth endpoints, top-down XY
 fig, ax = plt.subplots(figsize=(6, 6))
 ax.scatter(wall_xyz[:, 0], wall_xyz[:, 1], s=1, alpha=0.2,
            label=f"wall starts ({n_wall})", color="grey")
@@ -483,7 +479,7 @@ ax.set_title("Wall starts vs backward-recovered birth endpoints")
 fig.tight_layout(); fig.savefig(pdir / "wall_vs_birth_xy.png", dpi=150)
 plt.close(fig)
 
-# 2. Birth endpoints in R-Z.
+# 2. Birth endpoints in R-Z
 fig, ax = plt.subplots(figsize=(6, 6))
 ax.scatter(R_b, Z_b, s=3, alpha=0.5, color="C1",
            label=f"birth endpoints ({M})")
@@ -493,7 +489,7 @@ ax.set_title("Birth endpoints in R–Z")
 fig.tight_layout(); fig.savefig(pdir / "birth_RZ.png", dpi=150)
 plt.close(fig)
 
-# 3. s histogram — clip to [0, 1] for the view.
+# 3. s histogram — clip to [0, 1] for the view
 fig, ax = plt.subplots(figsize=(7, 4))
 s_for_hist = s_b[np.isfinite(s_b)]
 bins = np.linspace(0, 1, 41)
@@ -511,7 +507,7 @@ ax.set_xlim(0, 1); ax.legend()
 fig.tight_layout(); fig.savefig(pdir / "s_histogram.png", dpi=150)
 plt.close(fig)
 
-# 4. Reactivity evaluated at each birth-endpoint s.
+# 4. Reactivity evaluated at each birth-endpoint s
 fig, ax = plt.subplots(figsize=(7, 4))
 reac_at_births = fusion_reactivity(np.clip(s_for_hist, 0, 1))
 ax.hist(reac_at_births, bins=40, alpha=0.7, color="C2")
@@ -521,7 +517,7 @@ ax.set_title("Reactivity at birth endpoints")
 fig.tight_layout(); fig.savefig(pdir / "reactivity_histogram.png", dpi=150)
 plt.close(fig)
 
-# 5. Stop-code bar chart.
+# 5. Stop-code bar chart
 fig, ax = plt.subplots(figsize=(6, 4))
 sc_counts = summarize_stop_codes(stop_codes)
 labels = {0: "tmax", 1: "wall", 2: "H_fusion", 3: "invalid"}
