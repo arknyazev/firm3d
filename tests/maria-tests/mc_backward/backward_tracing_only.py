@@ -124,12 +124,37 @@ class Inputs:
 
     # Tracing
     n_wall:         int   = 1_000_000
+    # tmax_backward is recomputed below from slowing-down time and H range.
     tmax_backward:  float = 5e-5
     tol:            float = 1e-9
     seed:           int   = 57
 
+    # Finite-difference step [m] used to get outward normal via ∇(signed distance)
+    normal_fd_eps: float = 1e-4
+
 
 inp = Inputs()
+
+
+# ── Slowing-down time and required backward time horizon ─────────────────────
+#   t_req = ln(H_fusion / H_low) * tau_s
+def _slowing_down_time(ne, Te_eV, mass, coulomb_log):
+    eps0 = 8.8541878128e-12
+    e_ch = 1.602176634e-19
+    m_e  = 9.1093837015e-31
+    Z_alpha = 2.0
+    Te_J = Te_eV * e_ch
+    num = 3.0 * (2.0 * np.pi) ** 1.5 * eps0 ** 2 * mass * Te_J ** 1.5
+    den = Z_alpha ** 2 * e_ch ** 4 * np.sqrt(m_e) * ne * coulomb_log
+    return num / den
+
+_tau_s = _slowing_down_time(inp.ne0, inp.Te0_ev, inp.mass, inp.coulomb_log)
+_tmax_required = np.log(inp.H_fusion / inp.H_low) * _tau_s
+# Headroom 1.2x so energy stop can trigger before hitting tmax
+inp.tmax_backward = float(1.2 * _tmax_required)
+print(f"tau_s = {_tau_s:.4e} s, tmax_backward = {inp.tmax_backward:.4e} s "
+      f"(= 1.2 * ln(H_fusion/H_low) * tau_s)")
+
 
 # ── Output directory ─────────────────────────────────────────────────────────
 
@@ -285,11 +310,54 @@ if n_outside:
 
 phi_wall = wrap_phi(phi_wall, phi_min, phi_max)
 
-# Sample uniform pitch and uniform energy
-lam_wall  = rng.uniform(-1.0, 1.0, size=n_wall)
+# ── Pitch sampling: velocity must point into the plasma at the wall ──────────
+#   v ≈ v_par * b̂   (guiding-centre, ignoring drifts)
+#   require v · n̂_out <= 0  ⇔  sign(lambda) = -sign(b̂ · n̂_out)
+#
+# Outward normal n̂_out is obtained as -∇(signed distance) / |∇(signed distance)|
+# via central differences on sc_particle.evaluate_rphiz (sd>0 is inside, so ∇sd
+# points inward). b̂ comes from Biot–Savart B at the same point.
+def _sd_xyz(xyz_arr):
+    R  = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
+    ph = np.arctan2(xyz_arr[:, 1], xyz_arr[:, 0])
+    Zc = xyz_arr[:, 2]
+    return sc_particle.evaluate_rphiz(np.column_stack([R, ph, Zc])).ravel()
+
+_xyz_wall = np.column_stack([
+    R_wall * np.cos(phi_wall),
+    R_wall * np.sin(phi_wall),
+    Z_wall,
+])
+_eps = inp.normal_fd_eps
+_grad_sd = np.zeros_like(_xyz_wall)
+for _i in range(3):
+    _d = np.zeros(3); _d[_i] = _eps
+    _grad_sd[:, _i] = (_sd_xyz(_xyz_wall + _d) - _sd_xyz(_xyz_wall - _d)) / (2 * _eps)
+_grad_norm = np.linalg.norm(_grad_sd, axis=1, keepdims=True)
+_grad_norm[_grad_norm == 0.0] = 1.0
+n_out_hat = -_grad_sd / _grad_norm   # outward unit normal (sd increases inward)
+
+bs.set_points(_xyz_wall)
+_B = bs.B()
+_B_norm = np.linalg.norm(_B, axis=1, keepdims=True)
+_B_norm[_B_norm == 0.0] = 1.0
+b_hat = _B / _B_norm
+
+b_dot_n = np.einsum("ij,ij->i", b_hat, n_out_hat)
+
+lam_abs   = rng.uniform(0.0, 1.0, size=n_wall)
+# sign(lambda) = -sign(b · n_out)  →  v_par*b̂ has negative n_out component
+_sign = -np.sign(b_dot_n)
+# tie-break when b is tangent to the surface
+_sign = np.where(_sign == 0.0, rng.choice([-1.0, 1.0], size=n_wall), _sign)
+lam_wall = lam_abs * _sign
+
 H_wall    = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
 vtang_w   = lam_wall * v_total_w
+
+print(f"  pitch oriented inward: mean(v·n_out) = "
+      f"{np.mean(lam_wall * b_dot_n * v_total_w):.3e} m/s (should be <= 0)")
 
 # Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants
 stz_init = np.empty(3 * n_wall, dtype=np.float64)
@@ -331,6 +399,38 @@ print(f"  tracing done in {time.time()-t0:.2f}s")
 np.save(out_dir / "backward_results.npy", bwd)
 stop_codes = bwd[:, 6].astype(int)
 print(f"  stop codes: {summarize_stop_codes(stop_codes)}")
+
+# Per-category final energy statistics [MeV].
+_H_final_all = bwd[:, 5]
+_label = {0: "tmax", 1: "wall", 2: "H_fusion", 3: "invalid"}
+print("\n  Final-energy stats per stop-code category [MeV]:")
+print(f"  {'cat':<10}{'n':>8}{'min':>10}{'max':>10}{'mean':>10}"
+      f"{'median':>10}{'std':>10}")
+H_stats_rows = []
+for code in sorted(np.unique(stop_codes)):
+    mask = stop_codes == code
+    Hs = _H_final_all[mask] / ONE_EV / 1e6
+    if Hs.size == 0:
+        continue
+    row = dict(
+        stop_code=int(code), label=_label.get(int(code), str(code)),
+        n=int(Hs.size),
+        H_min_MeV=float(Hs.min()), H_max_MeV=float(Hs.max()),
+        H_mean_MeV=float(Hs.mean()), H_median_MeV=float(np.median(Hs)),
+        H_std_MeV=float(Hs.std()),
+    )
+    H_stats_rows.append(row)
+    print(f"  {row['label']:<10}{row['n']:>8d}"
+          f"{row['H_min_MeV']:>10.4f}{row['H_max_MeV']:>10.4f}"
+          f"{row['H_mean_MeV']:>10.4f}{row['H_median_MeV']:>10.4f}"
+          f"{row['H_std_MeV']:>10.4f}")
+
+# Also dump as CSV for later analysis.
+with open(out_dir / "final_energy_stats.csv", "w", newline="") as f:
+    if H_stats_rows:
+        writer = csv.DictWriter(f, fieldnames=list(H_stats_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(H_stats_rows)
 
 
 # ── Step 3: filter success (stop_code == 2) and convert to Boozer ────────────
@@ -375,12 +475,31 @@ boozer_field = InterpolatedBoozerField(
     ntheta_interp=inp.boozer_res,
     nzeta_interp=inp.boozer_res,
 )
-boozer_coords = cylindrical_to_boozer(boozer_field, birth_rphiz)
+# Root finder raises if a single point fails to converge (e.g. numerically
+# outside the Boozer s∈[0,1] domain).  Fall back to per-point try/except so
+# failures mark the endpoint invalid instead of aborting the whole run.
+try:
+    boozer_coords = cylindrical_to_boozer(boozer_field, birth_rphiz)
+    n_failed_bz = 0
+except RuntimeError as exc:
+    print(f"  batched cylindrical_to_boozer failed ({exc}); falling back per-point")
+    boozer_coords = np.full_like(birth_rphiz, np.nan)
+    n_failed_bz = 0
+    for i in range(birth_rphiz.shape[0]):
+        try:
+            boozer_coords[i] = cylindrical_to_boozer(
+                boozer_field, birth_rphiz[i:i+1]
+            )[0]
+        except RuntimeError:
+            n_failed_bz += 1
+    if n_failed_bz:
+        print(f"  {n_failed_bz}/{birth_rphiz.shape[0]} endpoints failed Boozer conversion")
+
 s_b = boozer_coords[:, 0]
 np.save(out_dir / "birth_endpoints_boozer.npy", boozer_coords)
 
-# "Valid" Boozer coordinates == s in [0, 1]
-valid_bz = (s_b >= 0.0) & (s_b <= 1.0) & np.isfinite(s_b)
+# "Valid" Boozer coordinates == finite s in [0, 1]
+valid_bz = np.isfinite(s_b) & (s_b >= 0.0) & (s_b <= 1.0)
 M_valid = int(valid_bz.sum())
 frac_both = M_valid / n_wall
 np.save(out_dir / "valid_boozer_mask.npy", valid_bz)
