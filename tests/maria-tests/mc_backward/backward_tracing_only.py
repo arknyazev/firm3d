@@ -86,8 +86,8 @@ class Inputs:
     coil_file:       Path = THIS_DIR / "LandremanPaulQH_coils" / "coils.curves_22_7_21"
     vmec_input_file: Path = THIS_DIR / "LandremanPaulQH_coils" / "input.vmec"
     boozmn_file:     Path = THIS_DIR / "LandremanPaulQH_coils" / "boozmn.nc"
-    wall_ic_file:    Path = THIS_DIR / "3_IC_sample_wall" / "outputs" / "initial_conditions_surface_cylindrical.txt"
-
+    wall_ic_file = Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/initial_conditions_surface_cylindrical.txt")
+    
     # Equilibrium / coils
     nfp:        int   = 4
     ncoils:     int   = 5
@@ -134,7 +134,8 @@ inp = Inputs()
 # ── Output directory ─────────────────────────────────────────────────────────
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-out_dir = Path.home() / "mc_proj" / "results" / "backward_only" / timestamp
+out_dir = Path("/pscratch/sd/m/mariagar/projects/mc_proj/results/backward_only") / timestamp
+out_dir.mkdir(parents=True, exist_ok=True)
 (out_dir / "plots").mkdir(parents=True, exist_ok=True)
 print(f"Writing outputs to {out_dir}")
 
