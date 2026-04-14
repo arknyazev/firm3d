@@ -123,7 +123,7 @@ class Inputs:
     Te0_ev:      float = 5e3
 
     # Tracing
-    n_wall:         int   = 50_000
+    n_wall:         int   = 100
     tmax_backward:  float = 5e-5
     tol:            float = 1e-9
     seed:           int   = 57
