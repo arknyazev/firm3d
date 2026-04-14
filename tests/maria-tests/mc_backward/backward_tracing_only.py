@@ -337,28 +337,72 @@ _grad_norm = np.linalg.norm(_grad_sd, axis=1, keepdims=True)
 _grad_norm[_grad_norm == 0.0] = 1.0
 n_out_hat = -_grad_sd / _grad_norm   # outward unit normal (sd increases inward)
 
+# Full guiding-centre position rate
+#   ṙ = v_par * B/|B|  +  (1/(q |B|^3)) * (H + m v_par^2 / 2) * (B × ∇|B|)
+# We accept pitches such that ṙ · n̂_out has the intended sign at t=0, using
+# the full drift (curvature/∇B), not just the parallel proxy. Sign convention
+# here matches the rest of this script: ṙ · n̂_out ≥ 0 so the backward tracer's
+# first step moves the guiding centre inward.
 bs.set_points(_xyz_wall)
-_B = bs.B()
-_B_norm = np.linalg.norm(_B, axis=1, keepdims=True)
-_B_norm[_B_norm == 0.0] = 1.0
-b_hat = _B / _B_norm
+B_xyz     = np.asarray(bs.B())
+gradB_xyz = np.asarray(bs.GradAbsB())
+B_mag     = np.linalg.norm(B_xyz, axis=1)
+B_mag_safe = np.where(B_mag > 0.0, B_mag, 1.0)
+b_hat     = B_xyz / B_mag_safe[:, None]
+B_cross_gradB = np.cross(B_xyz, gradB_xyz)                   # (N, 3)
+drift_prefac  = 1.0 / (inp.charge * B_mag_safe ** 3)         # (N,)
 
-b_dot_n = np.einsum("ij,ij->i", b_hat, n_out_hat)
-
-lam_abs   = rng.uniform(0.0, 1.0, size=n_wall)
-# sign(lambda) = -sign(b · n_out)  →  v_par*b̂ has negative n_out component
-# FLIPPED SIGN HERE
-_sign = +np.sign(b_dot_n)
-# tie-break when b is tangent to the surface
-_sign = np.where(_sign == 0.0, rng.choice([-1.0, 1.0], size=n_wall), _sign)
-lam_wall = lam_abs * _sign
+# Pieces of ṙ · n̂_out independent of λ:
+b_dot_n    = np.einsum("ij,ij->i", b_hat,         n_out_hat)
+BxgB_dot_n = np.einsum("ij,ij->i", B_cross_gradB, n_out_hat)
 
 H_wall    = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
-vtang_w   = lam_wall * v_total_w
 
-print(f"  pitch oriented inward: mean(v·n_out) = "
-      f"{np.mean(lam_wall * b_dot_n * v_total_w):.3e} m/s (should be <= 0)")
+def _vn_full(lam):
+    """ṙ · n̂_out with full guiding-centre drift (per particle)."""
+    v_par = lam * v_total_w
+    drift = drift_prefac * (H_wall + 0.5 * inp.mass * v_par ** 2) * BxgB_dot_n
+    return v_par * b_dot_n + drift   # v_par*(b̂·n̂) + drift·n̂
+
+# Rejection-sample λ ~ U(-1, 1) with acceptance {ṙ · n̂_out ≥ 0}.
+# Only redraw rejected entries each iteration.
+lam_wall = rng.uniform(-1.0, 1.0, size=n_wall)
+reject   = _vn_full(lam_wall) < 0.0
+_max_iters = 50
+_iter = 0
+while reject.any() and _iter < _max_iters:
+    lam_wall[reject] = rng.uniform(-1.0, 1.0, size=int(reject.sum()))
+    reject = _vn_full(lam_wall) < 0.0
+    _iter += 1
+
+n_unrecoverable = int(reject.sum())
+if n_unrecoverable:
+    # Both signs of λ give ṙ · n̂_out < 0 at these points: drift points inward
+    # strongly enough that no pitch in [-1,1] flips ṙ. Drop them rather than
+    # introduce a biased proxy.
+    keep = ~reject
+    R_wall, phi_wall, Z_wall = R_wall[keep], phi_wall[keep], Z_wall[keep]
+    _xyz_wall  = _xyz_wall[keep]
+    n_out_hat  = n_out_hat[keep]
+    b_hat      = b_hat[keep]
+    b_dot_n    = b_dot_n[keep]
+    BxgB_dot_n = BxgB_dot_n[keep]
+    drift_prefac = drift_prefac[keep]
+    B_mag      = B_mag[keep]
+    H_wall     = H_wall[keep]
+    v_total_w  = v_total_w[keep]
+    lam_wall   = lam_wall[keep]
+    n_wall     = int(keep.sum())
+    print(f"  {n_unrecoverable} wall points rejected "
+          f"(full ṙ·n̂_out < 0 for all λ∈[-1,1]) — dropped")
+
+vtang_w = lam_wall * v_total_w
+
+_vn_chk = _vn_full(lam_wall)
+print(f"  full ṙ·n̂_out after sampling: min={_vn_chk.min():.3e}  "
+      f"mean={_vn_chk.mean():.3e}  (all ≥ 0)")
+print(f"  rejection iterations used: {_iter}")
 
 # Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants
 stz_init = np.empty(3 * n_wall, dtype=np.float64)
