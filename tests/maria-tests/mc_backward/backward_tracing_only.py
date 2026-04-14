@@ -123,8 +123,8 @@ class Inputs:
     Te0_ev:      float = 5e3
 
     # Tracing
-    n_wall:         int   = 1_000_000
-    # tmax_backward is recomputed below from slowing-down time and H range.
+    n_wall:         int   = 10_000_000  # same as in IC file from folder 3_
+    # tmax_backward is recomputed below from slowing-down time and H range
     tmax_backward:  float = 5e-5
     tol:            float = 1e-9
     seed:           int   = 57
@@ -347,7 +347,8 @@ b_dot_n = np.einsum("ij,ij->i", b_hat, n_out_hat)
 
 lam_abs   = rng.uniform(0.0, 1.0, size=n_wall)
 # sign(lambda) = -sign(b · n_out)  →  v_par*b̂ has negative n_out component
-_sign = -np.sign(b_dot_n)
+# FLIPPED SIGN HERE
+_sign = +np.sign(b_dot_n)
 # tie-break when b is tangent to the surface
 _sign = np.where(_sign == 0.0, rng.choice([-1.0, 1.0], size=n_wall), _sign)
 lam_wall = lam_abs * _sign
