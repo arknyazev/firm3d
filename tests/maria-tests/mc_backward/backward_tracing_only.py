@@ -23,7 +23,7 @@ Pipeline
 5. Report fraction reaching H_fusion, and fraction reaching H_fusion AND
    having valid Boozer coordinates.  Write CSV, VTK, matplotlib plots.
 
-Outputs (timestamped dir under outputs_backward_only/)
+Outputs (timestamped dir under "mc_proj" / "results" / "backward_only" / timestamp
 ------------------------------------------------------
   backward_results.npy             (n_wall, 7) full tracer output
   wall_starts_xyz.npy              (n_wall, 3) wall IC used
@@ -134,7 +134,7 @@ inp = Inputs()
 # ── Output directory ─────────────────────────────────────────────────────────
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-out_dir = THIS_DIR / "outputs_backward_only" / timestamp
+out_dir = Path.home() / "mc_proj" / "results" / "backward_only" / timestamp
 (out_dir / "plots").mkdir(parents=True, exist_ok=True)
 print(f"Writing outputs to {out_dir}")
 
