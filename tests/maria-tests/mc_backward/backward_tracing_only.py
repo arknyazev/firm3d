@@ -302,8 +302,7 @@ rng = np.random.default_rng(inp.seed)
 idx = rng.choice(n_avail, size=n_wall, replace=False)
 R_wall, phi_wall, Z_wall = R_all[idx], phi_all[idx], Z_all[idx]
 
-# Drop points outside the LCFS (?)
-"""
+# Drop points outside the LCFS
 sd = sc_particle.evaluate_rphiz(
     np.column_stack([R_wall, phi_wall, Z_wall])
 ).ravel()
@@ -315,7 +314,7 @@ if n_outside:
     n_wall = int(inside.sum())
 
 phi_wall = wrap_phi(phi_wall, phi_min, phi_max)
-"""
+
 
 # ── Pitch sampling: velocity must point into the plasma at the wall ──────────
 #   v ≈ v_par * b̂   (guiding-centre, ignoring drifts)
