@@ -119,8 +119,8 @@ class Inputs:
     H_fusion:    float = H_FUSION
     coulomb_log: float = 17.0
     Te_in_eV:    bool  = True
-    ne0:         float = 1e24
-    Te0_ev:      float = 5000
+    ne0:         float = 1e21
+    Te0_ev:      float = 500
 
     # Tracing
     n_wall:         int   = 10_000_000  # same as in IC file from folder 3_
