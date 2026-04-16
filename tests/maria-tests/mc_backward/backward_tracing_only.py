@@ -123,7 +123,7 @@ class Inputs:
     Te0_ev:      float = 5e1
 
     # Tracing
-    n_wall:         int   = 10_000_000  # same as in IC file from folder 3_
+    n_wall:         int   = 10_000  # same as in IC file from folder 3_
     # Subsample of successful (stop_code==2) particles to re-trace with
     # snapshots to save real time-resolved trajectories.  Kept far smaller
     # than n_wall because each snapshot re-runs the tracer from t=0.
@@ -316,99 +316,149 @@ if n_outside:
 phi_wall = wrap_phi(phi_wall, phi_min, phi_max)
 
 
-# ── Pitch sampling: velocity must point into the plasma at the wall ──────────
-#   v ≈ v_par * b̂   (guiding-centre, ignoring drifts)
-#   require v · n̂_out <= 0  ⇔  sign(lambda) = -sign(b̂ · n̂_out)
-#
-# Outward normal n̂_out is obtained as -∇(signed distance) / |∇(signed distance)|
-# via central differences on sc_particle.evaluate_rphiz (sd>0 is inside, so ∇sd
-# points inward). b̂ comes from Biot–Savart B at the same point.
-def _sd_xyz(xyz_arr):
-    R  = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
-    ph = np.arctan2(xyz_arr[:, 1], xyz_arr[:, 0])
-    Zc = xyz_arr[:, 2]
-    return sc_particle.evaluate_rphiz(np.column_stack([R, ph, Zc])).ravel()
+# ── Pitch sampling: parallel velocity must point into the plasma at the wall ─
+# Simplified version: v ≈ v_par * b̂ (drifts dropped). Require
+# (v_par b̂) · n̂_out ≤ 0 so the particle moves inward at t=0; this is achieved
+# directly by choosing sign(λ) = -sign(b̂ · n̂_out), no rejection needed.
+# The fuller guiding-centre drift check is kept commented out below.
+def outward_unit_normal(xyz_wall, eps):
+    def sd_xyz(xyz_arr):
+        R = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
+        phi = np.arctan2(xyz_arr[:, 1], xyz_arr[:, 0])
+        Z = xyz_arr[:, 2]
+        return sc_particle.evaluate_rphiz(np.column_stack([R, phi, Z])).ravel()
+
+    grad_sd = np.zeros_like(xyz_wall)
+    for k in range(3):
+        d = np.zeros(3)
+        d[k] = eps
+        grad_sd[:, k] = (sd_xyz(xyz_wall + d) - sd_xyz(xyz_wall - d)) / (2 * eps)
+
+    grad_norm = np.linalg.norm(grad_sd, axis=1, keepdims=True)
+    grad_norm[grad_norm == 0.0] = 1.0
+    return -grad_sd / grad_norm   # outward normal if signed distance increases inward
+
 
 _xyz_wall = np.column_stack([
     R_wall * np.cos(phi_wall),
     R_wall * np.sin(phi_wall),
     Z_wall,
 ])
-_eps = inp.normal_fd_eps
-_grad_sd = np.zeros_like(_xyz_wall)
-for _i in range(3):
-    _d = np.zeros(3); _d[_i] = _eps
-    _grad_sd[:, _i] = (_sd_xyz(_xyz_wall + _d) - _sd_xyz(_xyz_wall - _d)) / (2 * _eps)
-_grad_norm = np.linalg.norm(_grad_sd, axis=1, keepdims=True)
-_grad_norm[_grad_norm == 0.0] = 1.0
-n_out_hat = -_grad_sd / _grad_norm   # outward unit normal (sd increases inward)
 
-# Full guiding-centre position rate
-#   ṙ = v_par * B/|B|  +  (1/(q |B|^3)) * (H + m v_par^2 / 2) * (B × ∇|B|)
-# We accept pitches such that ṙ · n̂_out has the intended sign at t=0, using
-# the full drift (curvature/∇B), not just the parallel proxy. Sign convention
-# here matches the rest of this script: ṙ · n̂_out ≥ 0 so the backward tracer's
-# first step moves the guiding centre inward.
+n_out_hat = outward_unit_normal(_xyz_wall, inp.normal_fd_eps)
+
 bs.set_points(_xyz_wall)
-B_xyz     = np.asarray(bs.B())
-gradB_xyz = np.asarray(bs.GradAbsB())
-B_mag     = np.linalg.norm(B_xyz, axis=1)
-B_mag_safe = np.where(B_mag > 0.0, B_mag, 1.0)
-b_hat     = B_xyz / B_mag_safe[:, None]
-B_cross_gradB = np.cross(B_xyz, gradB_xyz)                   # (N, 3)
-drift_prefac  = 1.0 / (inp.charge * B_mag_safe ** 3)         # (N,)
+B_xyz = np.asarray(bs.B())
+B_mag = np.linalg.norm(B_xyz, axis=1, keepdims=True)
+B_mag[B_mag == 0.0] = 1.0
+b_hat = B_xyz / B_mag
 
-# Pieces of ṙ · n̂_out independent of λ:
-b_dot_n    = np.einsum("ij,ij->i", b_hat,         n_out_hat)
-BxgB_dot_n = np.einsum("ij,ij->i", B_cross_gradB, n_out_hat)
+b_dot_n = np.einsum("ij,ij->i", b_hat, n_out_hat)
 
-H_wall    = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
+H_wall = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
 
-def _vn_full(lam):
-    """ṙ · n̂_out with full guiding-centre drift (per particle)."""
-    v_par = lam * v_total_w
-    drift = drift_prefac * (H_wall + 0.5 * inp.mass * v_par ** 2) * BxgB_dot_n
-    return v_par * b_dot_n + drift   # v_par*(b̂·n̂) + drift·n̂
+lam_abs = rng.uniform(0.0, 1.0, size=n_wall)
+lam_wall = -np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out ≤ 0
 
-# Rejection-sample λ ~ U(-1, 1) with acceptance {ṙ · n̂_out ≥ 0}.
-# Only redraw rejected entries each iteration.
-lam_wall = rng.uniform(-1.0, 1.0, size=n_wall)
-reject   = _vn_full(lam_wall) < 0.0
-_max_iters = 50
-_iter = 0
-while reject.any() and _iter < _max_iters:
-    lam_wall[reject] = rng.uniform(-1.0, 1.0, size=int(reject.sum()))
-    reject = _vn_full(lam_wall) < 0.0
-    _iter += 1
-
-n_unrecoverable = int(reject.sum())
-if n_unrecoverable:
-    # Both signs of λ give ṙ · n̂_out < 0 at these points: drift points inward
-    # strongly enough that no pitch in [-1,1] flips ṙ. Drop them rather than
-    # introduce a biased proxy.
-    keep = ~reject
-    R_wall, phi_wall, Z_wall = R_wall[keep], phi_wall[keep], Z_wall[keep]
-    _xyz_wall  = _xyz_wall[keep]
-    n_out_hat  = n_out_hat[keep]
-    b_hat      = b_hat[keep]
-    b_dot_n    = b_dot_n[keep]
-    BxgB_dot_n = BxgB_dot_n[keep]
-    drift_prefac = drift_prefac[keep]
-    B_mag      = B_mag[keep]
-    H_wall     = H_wall[keep]
-    v_total_w  = v_total_w[keep]
-    lam_wall   = lam_wall[keep]
-    n_wall     = int(keep.sum())
-    print(f"  {n_unrecoverable} wall points rejected "
-          f"(full ṙ·n̂_out < 0 for all λ∈[-1,1]) — dropped")
+# fallback where b_hat·n_out is numerically zero
+mask_zero = np.isclose(b_dot_n, 0.0)
+lam_wall[mask_zero] = rng.uniform(-1.0, 1.0, size=int(np.count_nonzero(mask_zero)))
 
 vtang_w = lam_wall * v_total_w
 
-_vn_chk = _vn_full(lam_wall)
-print(f"  full ṙ·n̂_out after sampling: min={_vn_chk.min():.3e}  "
-      f"mean={_vn_chk.mean():.3e}  (all ≥ 0)")
-print(f"  rejection iterations used: {_iter}")
+_vn_par = lam_wall * v_total_w * b_dot_n
+print(f"  (v_par b̂)·n̂_out after sampling: max={_vn_par.max():.3e}  "
+      f"mean={_vn_par.mean():.3e}  (all ≤ 0)")
+print(f"  b̂·n̂_out ≈ 0 fallbacks: {int(mask_zero.sum())}")
+
+# ── Old full guiding-centre drift check (kept for reference) ────────────────
+# def _sd_xyz(xyz_arr):
+#     R  = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
+#     ph = np.arctan2(xyz_arr[:, 1], xyz_arr[:, 0])
+#     Zc = xyz_arr[:, 2]
+#     return sc_particle.evaluate_rphiz(np.column_stack([R, ph, Zc])).ravel()
+#
+# _xyz_wall = np.column_stack([
+#     R_wall * np.cos(phi_wall),
+#     R_wall * np.sin(phi_wall),
+#     Z_wall,
+# ])
+# _eps = inp.normal_fd_eps
+# _grad_sd = np.zeros_like(_xyz_wall)
+# for _i in range(3):
+#     _d = np.zeros(3); _d[_i] = _eps
+#     _grad_sd[:, _i] = (_sd_xyz(_xyz_wall + _d) - _sd_xyz(_xyz_wall - _d)) / (2 * _eps)
+# _grad_norm = np.linalg.norm(_grad_sd, axis=1, keepdims=True)
+# _grad_norm[_grad_norm == 0.0] = 1.0
+# n_out_hat = -_grad_sd / _grad_norm   # outward unit normal (sd increases inward)
+#
+# # Full guiding-centre position rate
+# #   ṙ = v_par * B/|B|  +  (1/(q |B|^3)) * (H + m v_par^2 / 2) * (B × ∇|B|)
+# # We accept pitches such that ṙ · n̂_out has the intended sign at t=0, using
+# # the full drift (curvature/∇B), not just the parallel proxy. Sign convention
+# # here matches the rest of this script: ṙ · n̂_out ≥ 0 so the backward tracer's
+# # first step moves the guiding centre inward.
+# bs.set_points(_xyz_wall)
+# B_xyz     = np.asarray(bs.B())
+# gradB_xyz = np.asarray(bs.GradAbsB())
+# B_mag     = np.linalg.norm(B_xyz, axis=1)
+# B_mag_safe = np.where(B_mag > 0.0, B_mag, 1.0)
+# b_hat     = B_xyz / B_mag_safe[:, None]
+# B_cross_gradB = np.cross(B_xyz, gradB_xyz)                   # (N, 3)
+# drift_prefac  = 1.0 / (inp.charge * B_mag_safe ** 3)         # (N,)
+#
+# # Pieces of ṙ · n̂_out independent of λ:
+# b_dot_n    = np.einsum("ij,ij->i", b_hat,         n_out_hat)
+# BxgB_dot_n = np.einsum("ij,ij->i", B_cross_gradB, n_out_hat)
+#
+# H_wall    = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
+# v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
+#
+# def _vn_full(lam):
+#     """ṙ · n̂_out with full guiding-centre drift (per particle)."""
+#     v_par = lam * v_total_w
+#     drift = drift_prefac * (H_wall + 0.5 * inp.mass * v_par ** 2) * BxgB_dot_n
+#     return v_par * b_dot_n + drift   # v_par*(b̂·n̂) + drift·n̂
+#
+# # Rejection-sample λ ~ U(-1, 1) with acceptance {ṙ · n̂_out ≥ 0}.
+# # Only redraw rejected entries each iteration.
+# lam_wall = rng.uniform(-1.0, 1.0, size=n_wall)
+# reject   = _vn_full(lam_wall) < 0.0
+# _max_iters = 50
+# _iter = 0
+# while reject.any() and _iter < _max_iters:
+#     lam_wall[reject] = rng.uniform(-1.0, 1.0, size=int(reject.sum()))
+#     reject = _vn_full(lam_wall) < 0.0
+#     _iter += 1
+#
+# n_unrecoverable = int(reject.sum())
+# if n_unrecoverable:
+#     # Both signs of λ give ṙ · n̂_out < 0 at these points: drift points inward
+#     # strongly enough that no pitch in [-1,1] flips ṙ. Drop them rather than
+#     # introduce a biased proxy.
+#     keep = ~reject
+#     R_wall, phi_wall, Z_wall = R_wall[keep], phi_wall[keep], Z_wall[keep]
+#     _xyz_wall  = _xyz_wall[keep]
+#     n_out_hat  = n_out_hat[keep]
+#     b_hat      = b_hat[keep]
+#     b_dot_n    = b_dot_n[keep]
+#     BxgB_dot_n = BxgB_dot_n[keep]
+#     drift_prefac = drift_prefac[keep]
+#     B_mag      = B_mag[keep]
+#     H_wall     = H_wall[keep]
+#     v_total_w  = v_total_w[keep]
+#     lam_wall   = lam_wall[keep]
+#     n_wall     = int(keep.sum())
+#     print(f"  {n_unrecoverable} wall points rejected "
+#           f"(full ṙ·n̂_out < 0 for all λ∈[-1,1]) — dropped")
+#
+# vtang_w = lam_wall * v_total_w
+#
+# _vn_chk = _vn_full(lam_wall)
+# print(f"  full ṙ·n̂_out after sampling: min={_vn_chk.min():.3e}  "
+#       f"mean={_vn_chk.mean():.3e}  (all ≥ 0)")
+# print(f"  rejection iterations used: {_iter}")
 
 # Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants
 stz_init = np.empty(3 * n_wall, dtype=np.float64)
@@ -745,6 +795,72 @@ else:
     np.save(out_dir / "trajectories_sample_idx.npy", traj_sel)
     print(f"  wrote trajectories_*.npy  "
           f"(n_traj={n_traj}, n_snap={inp.n_snapshots})")
+
+    # Paraview polyline export: one VTK_POLY_LINE per particle, prepended with
+    # the wall start point (t=0) so each polyline begins at the wall IC and
+    # ends at the birth endpoint.
+    wall_xyz_traj = wall_xyz[traj_sel]
+    pts_per = 1 + inp.n_snapshots
+    pts = np.empty((n_traj, pts_per, 3), dtype=np.float64)
+    pts[:, 0, :]  = wall_xyz_traj
+    pts[:, 1:, :] = traj_xyz
+
+    t_pt    = np.empty((n_traj, pts_per), dtype=np.float64)
+    vpar_pt = np.empty((n_traj, pts_per), dtype=np.float64)
+    H_pt    = np.empty((n_traj, pts_per), dtype=np.float64)
+    t_pt[:, 0]     = 0.0
+    t_pt[:, 1:]    = traj_time
+    vpar_pt[:, 0]  = vtang_traj
+    vpar_pt[:, 1:] = traj_vpar
+    H_pt[:, 0]     = H_traj
+    H_pt[:, 1:]    = traj_H
+
+    flat_pts  = pts.reshape(-1, 3)
+    flat_t    = t_pt.reshape(-1)
+    flat_vpar = vpar_pt.reshape(-1)
+    flat_H    = H_pt.reshape(-1)
+    n_total_pts = flat_pts.shape[0]
+
+    root = ET.Element("VTKFile", type="UnstructuredGrid",
+                      version="0.1", byte_order="LittleEndian")
+    ugrid = ET.SubElement(root, "UnstructuredGrid")
+    piece = ET.SubElement(ugrid, "Piece",
+                          NumberOfPoints=str(n_total_pts),
+                          NumberOfCells=str(n_traj))
+
+    pts_elem = ET.SubElement(piece, "Points")
+    da = ET.SubElement(pts_elem, "DataArray",
+                       type="Float64", NumberOfComponents="3", format="ascii")
+    da.text = " ".join(f"{x:.6e} {y:.6e} {z:.6e}" for x, y, z in flat_pts)
+
+    cells = ET.SubElement(piece, "Cells")
+    conn = ET.SubElement(cells, "DataArray",
+                         type="Int32", Name="connectivity", format="ascii")
+    conn.text = " ".join(str(i) for i in range(n_total_pts))
+    off = ET.SubElement(cells, "DataArray",
+                        type="Int32", Name="offsets", format="ascii")
+    off.text = " ".join(str(pts_per * (k + 1)) for k in range(n_traj))
+    typ = ET.SubElement(cells, "DataArray",
+                        type="UInt8", Name="types", format="ascii")
+    typ.text = " ".join(["4"] * n_traj)  # 4 = VTK_POLY_LINE
+
+    pdata = ET.SubElement(piece, "PointData")
+    for name, data in [("time", flat_t), ("vpar", flat_vpar), ("H", flat_H)]:
+        d = ET.SubElement(pdata, "DataArray",
+                          type="Float64", Name=name, format="ascii")
+        d.text = " ".join(f"{v:.6e}" for v in data)
+
+    cdata = ET.SubElement(piece, "CellData")
+    pid = ET.SubElement(cdata, "DataArray",
+                        type="Int32", Name="particle_id", format="ascii")
+    pid.text = " ".join(str(int(i)) for i in traj_sel)
+
+    tree = ET.ElementTree(root)
+    ET.indent(tree, space="  ")
+    tree.write(str(out_dir / "trajectories.vtu"),
+               encoding="utf-8", xml_declaration=True)
+    print(f"  wrote trajectories.vtu ({n_traj} polylines, "
+          f"{pts_per} points each)")
 
 
 # ── Step 6: matplotlib figures ──────────────────────────────────────────────
