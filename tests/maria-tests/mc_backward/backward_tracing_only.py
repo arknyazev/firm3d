@@ -359,7 +359,8 @@ H_wall = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
 
 lam_abs = rng.uniform(0.0, 1.0, size=n_wall)
-lam_wall = -np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out ≤ 0
+# FLIPPED LEADING SIGN FOR CHECK
+lam_wall = np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out ≤ 0
 
 # fallback where b_hat·n_out is numerically zero
 mask_zero = np.isclose(b_dot_n, 0.0)
