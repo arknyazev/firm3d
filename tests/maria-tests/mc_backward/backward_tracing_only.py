@@ -123,7 +123,7 @@ class Inputs:
     Te0_ev:      float = 5000
 
     # Tracing
-    n_wall:         int   = 10_000  # same as in IC file from folder 3_
+    n_wall:         int   = 10_000_000  # same as in IC file from folder 3_
     # Subsample of successful (stop_code==2) particles to re-trace with
     # snapshots to save real time-resolved trajectories.  Kept far smaller
     # than n_wall because each snapshot re-runs the tracer from t=0.
