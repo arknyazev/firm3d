@@ -318,9 +318,7 @@ phi_wall = wrap_phi(phi_wall, phi_min, phi_max)
 
 # ── Pitch sampling: parallel velocity must point into the plasma at the wall ─
 # Simplified version: v ≈ v_par * b̂ (drifts dropped). Require
-# (v_par b̂) · n̂_out ≤ 0 so the particle moves inward at t=0; this is achieved
-# directly by choosing sign(λ) = -sign(b̂ · n̂_out), no rejection needed.
-# The fuller guiding-centre drift check is kept commented out below.
+# (v_par b̂) · n̂_out ≤ 0 so the particle moves inward at t=0.
 def outward_unit_normal(xyz_wall, eps):
     def sd_xyz(xyz_arr):
         R = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
@@ -359,8 +357,7 @@ H_wall = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
 
 lam_abs = rng.uniform(0.0, 1.0, size=n_wall)
-# FLIPPED LEADING SIGN FOR CHECK
-lam_wall = np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out ≤ 0
+lam_wall = -np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out ≤ 0
 
 # fallback where b_hat·n_out is numerically zero
 mask_zero = np.isclose(b_dot_n, 0.0)
@@ -372,94 +369,6 @@ _vn_par = lam_wall * v_total_w * b_dot_n
 print(f"  (v_par b̂)·n̂_out after sampling: max={_vn_par.max():.3e}  "
       f"mean={_vn_par.mean():.3e}  (all ≤ 0)")
 print(f"  b̂·n̂_out ≈ 0 fallbacks: {int(mask_zero.sum())}")
-
-# ── Old full guiding-centre drift check (kept for reference) ────────────────
-# def _sd_xyz(xyz_arr):
-#     R  = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
-#     ph = np.arctan2(xyz_arr[:, 1], xyz_arr[:, 0])
-#     Zc = xyz_arr[:, 2]
-#     return sc_particle.evaluate_rphiz(np.column_stack([R, ph, Zc])).ravel()
-#
-# _xyz_wall = np.column_stack([
-#     R_wall * np.cos(phi_wall),
-#     R_wall * np.sin(phi_wall),
-#     Z_wall,
-# ])
-# _eps = inp.normal_fd_eps
-# _grad_sd = np.zeros_like(_xyz_wall)
-# for _i in range(3):
-#     _d = np.zeros(3); _d[_i] = _eps
-#     _grad_sd[:, _i] = (_sd_xyz(_xyz_wall + _d) - _sd_xyz(_xyz_wall - _d)) / (2 * _eps)
-# _grad_norm = np.linalg.norm(_grad_sd, axis=1, keepdims=True)
-# _grad_norm[_grad_norm == 0.0] = 1.0
-# n_out_hat = -_grad_sd / _grad_norm   # outward unit normal (sd increases inward)
-#
-# # Full guiding-centre position rate
-# #   ṙ = v_par * B/|B|  +  (1/(q |B|^3)) * (H + m v_par^2 / 2) * (B × ∇|B|)
-# # We accept pitches such that ṙ · n̂_out has the intended sign at t=0, using
-# # the full drift (curvature/∇B), not just the parallel proxy. Sign convention
-# # here matches the rest of this script: ṙ · n̂_out ≥ 0 so the backward tracer's
-# # first step moves the guiding centre inward.
-# bs.set_points(_xyz_wall)
-# B_xyz     = np.asarray(bs.B())
-# gradB_xyz = np.asarray(bs.GradAbsB())
-# B_mag     = np.linalg.norm(B_xyz, axis=1)
-# B_mag_safe = np.where(B_mag > 0.0, B_mag, 1.0)
-# b_hat     = B_xyz / B_mag_safe[:, None]
-# B_cross_gradB = np.cross(B_xyz, gradB_xyz)                   # (N, 3)
-# drift_prefac  = 1.0 / (inp.charge * B_mag_safe ** 3)         # (N,)
-#
-# # Pieces of ṙ · n̂_out independent of λ:
-# b_dot_n    = np.einsum("ij,ij->i", b_hat,         n_out_hat)
-# BxgB_dot_n = np.einsum("ij,ij->i", B_cross_gradB, n_out_hat)
-#
-# H_wall    = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
-# v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
-#
-# def _vn_full(lam):
-#     """ṙ · n̂_out with full guiding-centre drift (per particle)."""
-#     v_par = lam * v_total_w
-#     drift = drift_prefac * (H_wall + 0.5 * inp.mass * v_par ** 2) * BxgB_dot_n
-#     return v_par * b_dot_n + drift   # v_par*(b̂·n̂) + drift·n̂
-#
-# # Rejection-sample λ ~ U(-1, 1) with acceptance {ṙ · n̂_out ≥ 0}.
-# # Only redraw rejected entries each iteration.
-# lam_wall = rng.uniform(-1.0, 1.0, size=n_wall)
-# reject   = _vn_full(lam_wall) < 0.0
-# _max_iters = 50
-# _iter = 0
-# while reject.any() and _iter < _max_iters:
-#     lam_wall[reject] = rng.uniform(-1.0, 1.0, size=int(reject.sum()))
-#     reject = _vn_full(lam_wall) < 0.0
-#     _iter += 1
-#
-# n_unrecoverable = int(reject.sum())
-# if n_unrecoverable:
-#     # Both signs of λ give ṙ · n̂_out < 0 at these points: drift points inward
-#     # strongly enough that no pitch in [-1,1] flips ṙ. Drop them rather than
-#     # introduce a biased proxy.
-#     keep = ~reject
-#     R_wall, phi_wall, Z_wall = R_wall[keep], phi_wall[keep], Z_wall[keep]
-#     _xyz_wall  = _xyz_wall[keep]
-#     n_out_hat  = n_out_hat[keep]
-#     b_hat      = b_hat[keep]
-#     b_dot_n    = b_dot_n[keep]
-#     BxgB_dot_n = BxgB_dot_n[keep]
-#     drift_prefac = drift_prefac[keep]
-#     B_mag      = B_mag[keep]
-#     H_wall     = H_wall[keep]
-#     v_total_w  = v_total_w[keep]
-#     lam_wall   = lam_wall[keep]
-#     n_wall     = int(keep.sum())
-#     print(f"  {n_unrecoverable} wall points rejected "
-#           f"(full ṙ·n̂_out < 0 for all λ∈[-1,1]) — dropped")
-#
-# vtang_w = lam_wall * v_total_w
-#
-# _vn_chk = _vn_full(lam_wall)
-# print(f"  full ṙ·n̂_out after sampling: min={_vn_chk.min():.3e}  "
-#       f"mean={_vn_chk.mean():.3e}  (all ≥ 0)")
-# print(f"  rejection iterations used: {_iter}")
 
 # Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants
 stz_init = np.empty(3 * n_wall, dtype=np.float64)
