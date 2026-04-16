@@ -792,8 +792,13 @@ Y_base = A_base     # Y_i = A_i when X_i ~ p0
 #   N_target(c)        = (cv_single_sample / c)**2, c in {0.10, 0.05, 0.02}
 # =============================================================================
 
-def estimator_metrics(Y, method_name, N, cv_targets=(0.10, 0.05, 0.02)):
+def estimator_metrics(Y, A, method_name, N, cv_targets=(0.10, 0.05, 0.02)):
+    """
+    Y: per-sample estimator contribution (A_i for FWD, A_i*p0/q for IS).
+    A: unweighted wall-hit indicator (used only for the raw hit count).
+    """
     Y = np.asarray(Y, dtype=np.float64)
+    A = np.asarray(A, dtype=np.float64)
     Q_hat = float(Y.mean())
     var_sample = float(Y.var(ddof=1)) if Y.size > 1 else 0.0
     var_estimator = var_sample / N
@@ -806,8 +811,7 @@ def estimator_metrics(Y, method_name, N, cv_targets=(0.10, 0.05, 0.02)):
     out = {
         "method":             method_name,
         "N":                  int(N),
-        "N_wall_hits":        int(Y[Y > 0].size if method_name == "FWD" else
-                                  int((Y > 0).sum())),
+        "N_wall_hits":        int((A > 0).sum()),
         "Q_hat":              Q_hat,
         "sample_variance":    var_sample,
         "estimator_variance": var_estimator,
@@ -824,14 +828,10 @@ def estimator_metrics(Y, method_name, N, cv_targets=(0.10, 0.05, 0.02)):
     return out
 
 
-# For the baseline, N_wall_hits is just the count of A_i == 1 (unweighted).
-N_hits_base = int((A_base > 0).sum())
-N_hits_is   = int((A_is > 0).sum())
-
-m_base = estimator_metrics(Y_base, "FWD", N=n_base)
-m_base["N_wall_hits"] = N_hits_base
-m_is = estimator_metrics(Y_is, "IS", N=N_is)
-m_is["N_wall_hits"] = N_hits_is
+m_base = estimator_metrics(Y_base, A_base, "FWD", N=n_base)
+m_is   = estimator_metrics(Y_is,   A_is,   "IS",  N=N_is)
+N_hits_base = m_base["N_wall_hits"]
+N_hits_is   = m_is["N_wall_hits"]
 
 # IS-specific diagnostics
 w_stats = {
