@@ -153,11 +153,11 @@ class Inputs:
     H_fusion:    float = H_FUSION         # birth energy (stop target)
     coulomb_log: float = 17.0
     Te_in_eV:    bool  = True
-    ne0:         float = 1e24             # matches backward_tracing_only.py
-    Te0_ev:      float = 5000
+    ne0:         float = 1e21             # matches backward_tracing_only.py
+    Te0_ev:      float = 100
 
     # Tracing
-    n_wall:        int   = 10_000   # matches backward_tracing_only.py
+    n_wall:        int   = 10_000 
     n_baseline:    int   = 10_000   # forward-only baseline sample count
     N_is:          int   = 10_000   # IS forward sample count
     # tmax_backward is recomputed below from slowing-down time
