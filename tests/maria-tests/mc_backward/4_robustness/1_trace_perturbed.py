@@ -81,8 +81,8 @@ class Inputs:
     # Files
     coil_file:       Path = COILS_DIR / "coils.curves_22_7_21"
     vmec_input_file: Path = COILS_DIR / "input.vmec"
-    ic_file_cyl:     Path = IC_DIR / "initial_conditions_cylindrical.txt"
-    ic_file_boozer:  Path = IC_DIR / "initial_conditions_boozer.txt"
+    ic_file_cyl:     Path = Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/initial_conditions_cylindrical.txt")
+    ic_file_boozer:  Path = Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/initial_conditions_boozer.txt")
     nparticles:      int  = 50_000   # particles per ensemble member (~4 min/run)
 
     # Equilibrium
