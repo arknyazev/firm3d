@@ -127,7 +127,7 @@ parser.add_argument(
 args    = parser.parse_args()
 pert_id = 57    #args.perturbation_id
 
-import datetime
+from datetime import datetime
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 OUT_DIR = Path("/pscratch/sd/m/mariagar/projects/mc_proj/results/perturb/") / timestamp
 OUT_DIR.mkdir(parents=True, exist_ok=True)
