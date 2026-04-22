@@ -94,7 +94,7 @@ class Inputs:
     # Coil perturbation
     # sigma = 1 mm is a realistic tight manufacturing tolerance;
     # try sigma = 3 mm or 5 mm to probe the sensitivity more aggressively.
-    sigma:  float = 1e-3   # Gaussian std dev of coil displacement [m]
+    sigma:  float = 1e-1   # Gaussian std dev of coil displacement [m]  (1e-3 -> 1mm)
     length: float = 0.5    # spatial correlation length [m] (smoothness)
 
     # Interpolation grid (same as 2_tracing_gpu)
@@ -125,7 +125,7 @@ parser.add_argument(
     help="0 = exact (baseline) coils; >0 = random seed for Gaussian perturbation",
 )
 args    = parser.parse_args()
-pert_id = args.perturbation_id
+pert_id = 57    #args.perturbation_id
 
 OUT_DIR = str(THIS_DIR / "output") + "/"
 os.makedirs(OUT_DIR, exist_ok=True)
