@@ -127,7 +127,12 @@ parser.add_argument(
 args    = parser.parse_args()
 pert_id = 57    #args.perturbation_id
 
-OUT_DIR = str(THIS_DIR / "output") + "/"
+import datetime
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+OUT_DIR = Path("/pscratch/sd/m/mariagar/projects/mc_proj/results/perturb/") / timestamp
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+#(OUT_DIR / "plots").mkdir(parents=True, exist_ok=True)
+print(f"Writing outputs to {OUT_DIR}")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 print(f"\n{'='*62}")
