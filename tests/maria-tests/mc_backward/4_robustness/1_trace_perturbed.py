@@ -37,6 +37,7 @@ import argparse
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from math import sqrt
 from pathlib import Path
 
@@ -127,8 +128,10 @@ parser.add_argument(
 args    = parser.parse_args()
 pert_id = 57    #args.perturbation_id
 
-OUT_DIR = str(THIS_DIR / "output") + "/"
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+OUT_DIR = str(Path("/pscratch/sd/m/mariagar/projects/mc_proj/results/robustness") / timestamp) + "/"
 os.makedirs(OUT_DIR, exist_ok=True)
+print(f"Writing outputs to {OUT_DIR}")
 
 print(f"\n{'='*62}")
 if pert_id == 0:
