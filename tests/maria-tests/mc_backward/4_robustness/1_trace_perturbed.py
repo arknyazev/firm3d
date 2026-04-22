@@ -95,7 +95,7 @@ class Inputs:
     # Coil perturbation
     # sigma = 1 mm is a realistic tight manufacturing tolerance;
     # try sigma = 3 mm or 5 mm to probe the sensitivity more aggressively.
-    sigma:  float = 1e-1   # Gaussian std dev of coil displacement [m]  (1e-3 -> 1mm)
+    sigma:  float = 1e-2   # Gaussian std dev of coil displacement [m]  (1e-3 -> 1mm)
     length: float = 0.5    # spatial correlation length [m] (smoothness)
 
     # Interpolation grid (same as 2_tracing_gpu)
