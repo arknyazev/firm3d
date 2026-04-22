@@ -157,9 +157,9 @@ class Inputs:
     Te0_ev:      float = 100
 
     # Tracing
-    n_wall:        int   = 10_000 
-    n_baseline:    int   = 10_000   # forward-only baseline sample count
-    N_is:          int   = 10_000   # IS forward sample count
+    n_wall:        int   = 100_000 
+    n_baseline:    int   = 100_000   # forward-only baseline sample count
+    N_is:          int   = 100_000   # IS forward sample count
     # tmax_backward is recomputed below from slowing-down time
     tmax_backward: float = 5e-5
     tmax_forward:  float = 1e-2
