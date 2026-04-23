@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=sigma_scan
-#SBATCH --account=m4505
+#SBATCH --account=m4680
 #SBATCH --constraint=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-task=1
 #SBATCH --gpu-bind=none
 #SBATCH --qos=regular
-#SBATCH --time=00:30:00
+#SBATCH --time=01:30:00
 #SBATCH --output=%x_%j.log
 #
 # Run ``3_trace_perturbed_drag.py`` for 4 sigma values in parallel on 1

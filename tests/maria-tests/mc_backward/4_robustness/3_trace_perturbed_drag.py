@@ -75,7 +75,7 @@ class Inputs:
     vmec_input_file: Path = COILS_DIR / "input.vmec"
     ic_file_cyl:     Path = Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/initial_conditions_cylindrical.txt")
     ic_file_boozer:  Path = Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/initial_conditions_boozer.txt")
-    nparticles:      int  = 50_000
+    nparticles:      int  = 100_000
 
     # Equilibrium
     nfp:        int   = 4

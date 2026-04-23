@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=mc_comparison
-#SBATCH --account=m4505
+#SBATCH --account=m4680
 #SBATCH --constraint=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4          # 3 estimators + (optional) trajectory_viz

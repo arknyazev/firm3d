@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=fwd_mc_gold
-#SBATCH --account=m4505
+#SBATCH --account=m4680
 #SBATCH --constraint=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4          # one FWD shard per GPU
