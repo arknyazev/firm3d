@@ -47,7 +47,6 @@ class FieldConfig:
     ncoils: int = 5
     current: float = 1.27797548115612e7
     coil_order: int = 20
-    # Perturbation (matches 4_robustness/1_trace_perturbed.py exactly)
     sigma: float = 1e-2
     length: float = 0.5
     # Interpolation grid
