@@ -127,6 +127,14 @@ def parse_args():
                         "to both forward and backward).")
     p.add_argument("--n_snapshots", type=int, default=100,
                    help="Number of tmax snapshots per trajectory.")
+    p.add_argument("--tmax_forward_trajectory", type=float, default=2e-6,
+                   help="tmax used ONLY for forward trajectory snapshots. "
+                        "Must be << tmax_forward so snapshot step dt is "
+                        "comparable to the alpha gyro-period (~6e-8 s) and "
+                        "polylines look like resolved orbits instead of "
+                        "random jumps.  Does not affect the estimator. "
+                        "Backward polylines use the full pilot tmax, which "
+                        "is already short enough to be resolved.")
     return p.parse_args()
 
 
@@ -400,10 +408,28 @@ def main():
     np.save(out_dir / "score_on_pool.npy",     score)
     np.save(out_dir / "q_weights.npy",         q)
 
+    # Diagnostic: how much signal does the backward pilot actually give us?
+    # If `score` is zero on every pool marker, q collapses to uniform over the
+    # pool (q_tilde = alpha*ones) and the IS degenerates to plain uniform —
+    # correct but wasting the pilot.  This is the silent-failure mode to
+    # watch for when M_valid is small or backward s and pool s don't overlap
+    # in any bin.
+    n_nonzero_pool_score = int((score > 0).sum())
+    frac_nonzero_score   = n_nonzero_pool_score / max(N_pool, 1)
+
     print(f"  alpha_mix            : {alpha:.3e}")
     print(f"  s_score_nbins        : {args.s_score_nbins}")
     print(f"  bwd non-empty bins   : {int((s_hist > 0).sum())}/"
           f"{args.s_score_nbins}")
+    print(f"  pool markers with    : {n_nonzero_pool_score}/{N_pool} "
+          f"non-zero score (= {100*frac_nonzero_score:.1f}%)")
+    if n_nonzero_pool_score == 0:
+        print("  WARNING: backward pilot gave zero score on EVERY pool "
+              "marker -- proposal collapses to uniform, IS is effectively "
+              "equivalent to forward MC for this run.")
+    elif frac_nonzero_score < 0.1:
+        print("  NOTE: <10% of pool markers have non-zero backward score; "
+              "proposal is very concentrated, ESS may be small.")
     print(f"  q support            : {int((q > 0).sum())}/{N_pool} "
           f"(should equal N_pool when alpha>0)")
     print(f"  q min / max          : {q.min():.3e} / {q.max():.3e}")
@@ -456,18 +482,21 @@ def main():
     w_diag = is_weight_diagnostics(w_draw)
     metrics.update(w_diag)
     metrics.update({
-        "N_wall_hits":           int(A.sum()),
-        "N_pool":                int(N_pool),
-        "perturbation_id":       int(args.perturbation_id),
-        "s_score_nbins":         int(args.s_score_nbins),
-        "alpha_mix":             alpha,
-        "bn_mean":               float(field["bn_stats"][0]),
-        "bn_max":                float(field["bn_stats"][1]),
-        "seed":                  int(args.seed),
-        "pool_n_input":          pool_diag["n_input"],
-        "pool_n_outside_LCFS":   pool_diag["n_outside"],
-        "pool_n_boozer_failed":  pool_diag["n_bz_failed"],
-        "pool_n_boozer_invalid": pool_diag["n_bz_invalid"],
+        "N_wall_hits":             int(A.sum()),
+        "N_pool":                  int(N_pool),
+        "perturbation_id":         int(args.perturbation_id),
+        "s_score_nbins":           int(args.s_score_nbins),
+        "alpha_mix":               alpha,
+        "bwd_non_empty_bins":      int((s_hist > 0).sum()),
+        "pool_markers_nonzero_score": int(n_nonzero_pool_score),
+        "frac_pool_nonzero_score": float(frac_nonzero_score),
+        "bn_mean":                 float(field["bn_stats"][0]),
+        "bn_max":                  float(field["bn_stats"][1]),
+        "seed":                    int(args.seed),
+        "pool_n_input":            pool_diag["n_input"],
+        "pool_n_outside_LCFS":     pool_diag["n_outside"],
+        "pool_n_boozer_failed":    pool_diag["n_bz_failed"],
+        "pool_n_boozer_invalid":   pool_diag["n_bz_invalid"],
     })
     metrics.update(pilot_diag)
     for code, count in sc_counts.items():
@@ -571,7 +600,7 @@ def main():
                 vpar_init=vpar_s[fwd_sel], H_init=H_s[fwd_sel],
                 mass=MASS, charge=CHARGE, speed_ref=speed_ref,
                 coulomb_log=args.coulomb_log, Te_in_eV=True,
-                tmax=args.tmax_forward, tol=args.tol,
+                tmax=args.tmax_forward_trajectory, tol=args.tol,
                 n_snapshots=int(args.n_snapshots),
                 H_stop=0.0, use_energy_stop=False,
                 label="forward snapshots",

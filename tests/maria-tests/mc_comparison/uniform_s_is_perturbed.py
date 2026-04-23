@@ -103,6 +103,12 @@ def parse_args():
                    help="Subsample size for trajectory polylines.")
     p.add_argument("--n_snapshots", type=int, default=100,
                    help="Number of tmax snapshots per trajectory.")
+    p.add_argument("--tmax_forward_trajectory", type=float, default=2e-6,
+                   help="tmax used ONLY for forward trajectory snapshots. "
+                        "Must be << tmax_forward so snapshot step dt is "
+                        "comparable to the alpha gyro-period (~6e-8 s) and "
+                        "polylines look like resolved orbits instead of "
+                        "random jumps.  Does not affect the estimator.")
     return p.parse_args()
 
 
@@ -295,7 +301,7 @@ def main():
                 vpar_init=vpar_s[traj_sel], H_init=H_s[traj_sel],
                 mass=MASS, charge=CHARGE, speed_ref=speed_ref,
                 coulomb_log=args.coulomb_log, Te_in_eV=True,
-                tmax=args.tmax_forward, tol=args.tol,
+                tmax=args.tmax_forward_trajectory, tol=args.tol,
                 n_snapshots=int(args.n_snapshots),
                 H_stop=0.0, use_energy_stop=False,
                 label="forward snapshots",

@@ -51,12 +51,19 @@ OUT_ROOT=${OUT_ROOT:-/pscratch/sd/m/mariagar/projects/mc_proj/results/mc_compari
 SAVE_TRAJECTORIES=${SAVE_TRAJECTORIES:-1}
 N_TRAJECTORY=${N_TRAJECTORY:-50}
 N_SNAPSHOTS=${N_SNAPSHOTS:-100}
+# Forward polylines use a MUCH shorter tmax than the estimator's tmax_forward
+# so snapshot step dt is comparable to the alpha gyro-period (~6e-8 s) and
+# polylines render as resolved drift orbits instead of random jumps.
+# The estimator itself still uses the full tmax_forward — this flag only
+# reshapes the visualisation.
+TMAX_FORWARD_TRAJECTORY=${TMAX_FORWARD_TRAJECTORY:-2e-6}
 
 TRAJ_FLAGS=()
 if [[ "${SAVE_TRAJECTORIES}" != "0" ]]; then
     TRAJ_FLAGS=(--save_trajectories
-                --n_trajectory "${N_TRAJECTORY}"
-                --n_snapshots  "${N_SNAPSHOTS}")
+                --n_trajectory            "${N_TRAJECTORY}"
+                --n_snapshots             "${N_SNAPSHOTS}"
+                --tmax_forward_trajectory "${TMAX_FORWARD_TRAJECTORY}")
 fi
 
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
@@ -77,7 +84,7 @@ echo "   S_SCORE_NBINS  = ${S_SCORE_NBINS}"
 echo "   ALPHA_MIX      = ${ALPHA_MIX}"
 echo "   SEED           = ${SEED}"
 echo "   OUT_DIR        = ${OUT_DIR}"
-echo "   SAVE_TRAJ      = ${SAVE_TRAJECTORIES} (N_TRAJ=${N_TRAJECTORY}, N_SNAP=${N_SNAPSHOTS})"
+echo "   SAVE_TRAJ      = ${SAVE_TRAJECTORIES} (N_TRAJ=${N_TRAJECTORY}, N_SNAP=${N_SNAPSHOTS}, TMAX_FWD_TRAJ=${TMAX_FORWARD_TRAJECTORY})"
 echo "============================================================"
 
 # ── Launch three methods, one per GPU ──────────────────────────────────────
