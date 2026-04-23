@@ -47,6 +47,16 @@ ALPHA_MIX=${ALPHA_MIX:-0.05}
 SEED=${SEED:-57}
 OUT_ROOT=${OUT_ROOT:-/pscratch/sd/m/mariagar/projects/mc_proj/results/mc_comparison}
 
+# Backward-informed IS: coordinate used for the 1-D score histogram.
+# 'sd' = signed distance to VMEC LCFS (always defined, no Boozer inversion).
+# 's'  = Boozer s (original spec; requires cylindrical_to_boozer success).
+# Set SCORE_COORDINATE=s to restore the original Boozer-s behaviour.
+SCORE_COORDINATE=${SCORE_COORDINATE:-sd}
+
+# Backward pilot tmax = BACKWARD_TMAX_FACTOR * ln(H_fusion/H_low) * tau_s
+# Energy-stop fires first in practice, so this is just headroom.
+BACKWARD_TMAX_FACTOR=${BACKWARD_TMAX_FACTOR:-2.0}
+
 # Trajectory polylines for Paraview
 SAVE_TRAJECTORIES=${SAVE_TRAJECTORIES:-1}
 N_TRAJECTORY=${N_TRAJECTORY:-50}
@@ -84,6 +94,8 @@ echo "   S_SCORE_NBINS  = ${S_SCORE_NBINS}"
 echo "   ALPHA_MIX      = ${ALPHA_MIX}"
 echo "   SEED           = ${SEED}"
 echo "   OUT_DIR        = ${OUT_DIR}"
+echo "   SCORE_COORD    = ${SCORE_COORDINATE}  (backward-IS score axis)"
+echo "   BWD_TMAX_FAC   = ${BACKWARD_TMAX_FACTOR}"
 echo "   SAVE_TRAJ      = ${SAVE_TRAJECTORIES} (N_TRAJ=${N_TRAJECTORY}, N_SNAP=${N_SNAPSHOTS}, TMAX_FWD_TRAJ=${TMAX_FORWARD_TRAJECTORY})"
 echo "============================================================"
 
@@ -110,14 +122,16 @@ CUDA_VISIBLE_DEVICES=1 python uniform_s_is_perturbed.py \
 PID_UNIF=$!
 
 CUDA_VISIBLE_DEVICES=2 python backward_informed_is_perturbed.py \
-    --perturbation_id "${PERT_ID}" \
-    --n_samples       "${N_SAMPLES}" \
-    --n_pool          "${N_POOL}" \
-    --n_pilot         "${N_PILOT}" \
-    --s_score_nbins   "${S_SCORE_NBINS}" \
-    --alpha_mix       "${ALPHA_MIX}" \
-    --seed            "${SEED}" \
-    --out_dir         "${OUT_DIR}/backward_informed_is" \
+    --perturbation_id       "${PERT_ID}" \
+    --n_samples             "${N_SAMPLES}" \
+    --n_pool                "${N_POOL}" \
+    --n_pilot               "${N_PILOT}" \
+    --s_score_nbins         "${S_SCORE_NBINS}" \
+    --alpha_mix             "${ALPHA_MIX}" \
+    --seed                  "${SEED}" \
+    --score_coordinate      "${SCORE_COORDINATE}" \
+    --backward_tmax_factor  "${BACKWARD_TMAX_FACTOR}" \
+    --out_dir               "${OUT_DIR}/backward_informed_is" \
     "${TRAJ_FLAGS[@]}" \
     > "${LOG_DIR}/backward_informed_is.log" 2>&1 &
 PID_BACK=$!
