@@ -26,6 +26,7 @@ Plots produced
     wall_hit_locations.png  (XY, RZ) where the wall-hit samples hit
     bootstrap.png           bootstrap distribution of Q_hat per method
     zscore_matrix.png       pairwise |z|-score between methods
+    loss_time_hist.png      distribution of t_final for wall-hit samples
 """
 import argparse
 import csv
@@ -412,6 +413,51 @@ def plot_bootstrap(methods, out_path, n_bootstrap=1000, gold=None):
     print(f"  wrote {out_path.name}")
 
 
+def plot_loss_time_hist(methods, out_path):
+    """Distribution of t_final for wall-hit samples, per method.  This is
+    an empirical loss-time distribution — the `t_final` reported by the
+    tracer for stop_code==1 samples is exactly the wall-hit time."""
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    all_tloss = []
+    collected = []
+    for m in methods:
+        fr = m.get("forward_results")
+        if fr is None:
+            continue
+        stop = fr[:, 6].astype(int)
+        hit = stop == 1
+        if hit.sum() == 0:
+            continue
+        t_loss = fr[hit, 0]
+        all_tloss.append(t_loss)
+        collected.append((m["name"], t_loss))
+
+    if not collected:
+        print("  loss_time_hist: no wall hits in any method"); plt.close(fig); return
+
+    t_min = max(min(t.min() for t in all_tloss), 1e-9)
+    t_max = max(t.max() for t in all_tloss)
+    if t_max <= t_min:
+        t_max = t_min * 10.0
+    bins = np.logspace(np.log10(t_min), np.log10(t_max), 40)
+
+    for name, t_loss in collected:
+        ax.hist(t_loss, bins=bins, alpha=0.55,
+                color=METHOD_COLORS.get(name, "grey"),
+                label=f"{name}  (n={len(t_loss)})",
+                edgecolor="black", linewidth=0.3)
+    ax.set_xscale("log")
+    ax.set_xlabel("t_final [s]  (= wall-hit time for stop_code==1)")
+    ax.set_ylabel("count")
+    ax.set_title("Loss-time distribution per method")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"  wrote {out_path.name}")
+
+
 def plot_zscore_matrix(methods, out_path, gold=None):
     labelled = list(methods) + ([gold] if gold is not None else [])
     names = [m["name"] for m in labelled
@@ -500,6 +546,7 @@ def main():
     plot_wall_hit_locations(methods, out_dir / "wall_hit_locations.png")
     plot_bootstrap(         methods, out_dir / "bootstrap.png",
                             n_bootstrap=args.bootstrap_n, gold=gold)
+    plot_loss_time_hist(    methods, out_dir / "loss_time_hist.png")
     plot_zscore_matrix(     methods, out_dir / "zscore_matrix.png", gold=gold)
     print("Done.")
 

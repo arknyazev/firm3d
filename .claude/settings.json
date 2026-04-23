@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/Users/mariagarmonina/Desktop/mc_plasma/code/firm3d-clone/firm3d/tests/maria-tests/mc_comparison/inspect_pool_samples.py'\\).read\\(\\)\\)\")"
-    ]
-  }
-}
