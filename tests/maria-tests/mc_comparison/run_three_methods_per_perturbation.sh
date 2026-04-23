@@ -34,7 +34,7 @@
 # array job, e.g. `#SBATCH --array=0,57,1,2,3` and use
 # PERT_ID=$SLURM_ARRAY_TASK_ID below.
 
-conda activate mc
+conda activate firm3d-maria
 set -u
 
 # ── Configurable parameters (env overrides) ────────────────────────────────
