@@ -40,7 +40,8 @@ THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${THIS_DIR}"
 
 PERT_ID=${PERT_ID:-57}
-SIGMAS_STR=${SIGMAS:-"1e-2 5e-2 1e-3 5e-3"}
+#SIGMAS_STR=${SIGMAS:-"1e-2 5e-2 1e-3 5e-3"}
+SIGMAS_STR=${SIGMAS:-"5e-1 1e-1 7e-2 1e-2"}
 read -r -a SIGMAS <<< "${SIGMAS_STR}"
 
 OUT_BASE=${OUT_BASE:-/pscratch/sd/m/mariagar/projects/mc_proj/results/robustness}
