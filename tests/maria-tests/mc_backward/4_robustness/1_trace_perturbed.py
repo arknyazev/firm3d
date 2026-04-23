@@ -129,7 +129,7 @@ args    = parser.parse_args()
 pert_id = 57    #args.perturbation_id
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-OUT_DIR = str(Path("/pscratch/sd/m/mariagar/projects/mc_proj/results/robustness") / timestamp) + "/"
+OUT_DIR = str(Path("/pscratch/sd/m/mariagar/projects/mc_proj/results/robustness/1e-2/") / timestamp) + "/"
 os.makedirs(OUT_DIR, exist_ok=True)
 print(f"Writing outputs to {OUT_DIR}")
 
