@@ -57,24 +57,9 @@ SCORE_COORDINATE=${SCORE_COORDINATE:-sd}
 # Energy-stop fires first in practice, so this is just headroom.
 BACKWARD_TMAX_FACTOR=${BACKWARD_TMAX_FACTOR:-2.0}
 
-# Trajectory polylines for Paraview
-SAVE_TRAJECTORIES=${SAVE_TRAJECTORIES:-1}
-N_TRAJECTORY=${N_TRAJECTORY:-50}
-N_SNAPSHOTS=${N_SNAPSHOTS:-100}
-# Forward polylines use a MUCH shorter tmax than the estimator's tmax_forward
-# so snapshot step dt is comparable to the alpha gyro-period (~6e-8 s) and
-# polylines render as resolved drift orbits instead of random jumps.
-# The estimator itself still uses the full tmax_forward — this flag only
-# reshapes the visualisation.
-TMAX_FORWARD_TRAJECTORY=${TMAX_FORWARD_TRAJECTORY:-2e-6}
-
-TRAJ_FLAGS=()
-if [[ "${SAVE_TRAJECTORIES}" != "0" ]]; then
-    TRAJ_FLAGS=(--save_trajectories
-                --n_trajectory            "${N_TRAJECTORY}"
-                --n_snapshots             "${N_SNAPSHOTS}"
-                --tmax_forward_trajectory "${TMAX_FORWARD_TRAJECTORY}")
-fi
+# Trajectory polylines are handled by the separate `trajectory_viz.py`
+# script so that deterministic trajectories aren't re-traced 3x.  The
+# three estimator scripts here focus on the estimator only.
 
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 OUT_DIR="${OUT_ROOT}/${TIMESTAMP}_pert${PERT_ID}"
@@ -96,7 +81,6 @@ echo "   SEED           = ${SEED}"
 echo "   OUT_DIR        = ${OUT_DIR}"
 echo "   SCORE_COORD    = ${SCORE_COORDINATE}  (backward-IS score axis)"
 echo "   BWD_TMAX_FAC   = ${BACKWARD_TMAX_FACTOR}"
-echo "   SAVE_TRAJ      = ${SAVE_TRAJECTORIES} (N_TRAJ=${N_TRAJECTORY}, N_SNAP=${N_SNAPSHOTS}, TMAX_FWD_TRAJ=${TMAX_FORWARD_TRAJECTORY})"
 echo "============================================================"
 
 # ── Launch three methods, one per GPU ──────────────────────────────────────
@@ -106,7 +90,6 @@ CUDA_VISIBLE_DEVICES=0 python forward_mc_perturbed.py \
     --n_pool          "${N_POOL}" \
     --seed            "${SEED}" \
     --out_dir         "${OUT_DIR}/forward_mc" \
-    "${TRAJ_FLAGS[@]}" \
     > "${LOG_DIR}/forward_mc.log" 2>&1 &
 PID_FWD=$!
 
@@ -117,7 +100,6 @@ CUDA_VISIBLE_DEVICES=1 python uniform_s_is_perturbed.py \
     --s_score_nbins   "${S_SCORE_NBINS}" \
     --seed            "${SEED}" \
     --out_dir         "${OUT_DIR}/uniform_s_is" \
-    "${TRAJ_FLAGS[@]}" \
     > "${LOG_DIR}/uniform_s_is.log" 2>&1 &
 PID_UNIF=$!
 
@@ -132,7 +114,6 @@ CUDA_VISIBLE_DEVICES=2 python backward_informed_is_perturbed.py \
     --score_coordinate      "${SCORE_COORDINATE}" \
     --backward_tmax_factor  "${BACKWARD_TMAX_FACTOR}" \
     --out_dir               "${OUT_DIR}/backward_informed_is" \
-    "${TRAJ_FLAGS[@]}" \
     > "${LOG_DIR}/backward_informed_is.log" 2>&1 &
 PID_BACK=$!
 

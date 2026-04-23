@@ -65,10 +65,7 @@ from estimator_utils import (
     write_metrics_csv,
 )
 from plot_utils import plot_s_hist, plot_weight_hist, plot_xy_rz
-from vtk_utils import (
-    trace_snapshots, write_coils_and_surface_vtk, write_points_vtu,
-    write_trajectory_polylines,
-)
+from vtk_utils import write_coils_and_surface_vtk, write_points_vtu
 
 
 THIS_DIR = Path(__file__).resolve().parent
@@ -137,22 +134,6 @@ def parse_args():
                    help="Multiplier on ln(H_fusion/H_low) * tau_s for the "
                         "backward-pilot tmax.  Energy-stop fires first in "
                         "practice, so this is just headroom.  Default 2.0.")
-    p.add_argument("--save_trajectories", action="store_true",
-                   help="Re-trace forward + backward subsamples with "
-                        "snapshots to build Paraview polylines.")
-    p.add_argument("--n_trajectory", type=int, default=200,
-                   help="Subsample size for trajectory polylines (applied "
-                        "to both forward and backward).")
-    p.add_argument("--n_snapshots", type=int, default=100,
-                   help="Number of tmax snapshots per trajectory.")
-    p.add_argument("--tmax_forward_trajectory", type=float, default=2e-6,
-                   help="tmax used ONLY for forward trajectory snapshots. "
-                        "Must be << tmax_forward so snapshot step dt is "
-                        "comparable to the alpha gyro-period (~6e-8 s) and "
-                        "polylines look like resolved orbits instead of "
-                        "random jumps.  Does not affect the estimator. "
-                        "Backward polylines use the full pilot tmax, which "
-                        "is already short enough to be resolved.")
     return p.parse_args()
 
 
@@ -647,77 +628,6 @@ def main():
                                  "t_elapsed":  fwd[:, 0],
                                  "wall_hit":   A,
                                  "is_weight":  w_draw})
-
-    # Optional trajectory polylines ---------------------------------------
-    if args.save_trajectories:
-        # Backward trajectories: subsample of successful (stop_code==2)
-        print("\n--- Backward trajectory snapshots ---")
-        success_idx = np.flatnonzero(pilot["hit_fusion"])
-        n_traj_bwd = int(min(args.n_trajectory, success_idx.size))
-        if n_traj_bwd > 0:
-            bwd_sel = rng.choice(success_idx, size=n_traj_bwd, replace=False)
-            snap_xyz, snap_vpar, snap_H, snap_time, _, _ = trace_snapshots(
-                tracer=cartesian_gpu_tracing_backward_drag, field=field,
-                R_init=pilot["wall_R"][bwd_sel],
-                phi_init=pilot["wall_phi"][bwd_sel],
-                Z_init=pilot["wall_Z"][bwd_sel],
-                vpar_init=pilot["wall_vpar"][bwd_sel],
-                H_init=pilot["wall_H"][bwd_sel],
-                mass=MASS, charge=CHARGE, speed_ref=speed_ref,
-                coulomb_log=args.coulomb_log, Te_in_eV=True,
-                tmax=pilot["tmax_backward"], tol=args.tol,
-                n_snapshots=int(args.n_snapshots),
-                H_stop=H_FUSION, use_energy_stop=True,
-                label="backward snapshots",
-            )
-            np.save(out_dir / "bwd_trajectories_xyz.npy",  snap_xyz)
-            np.save(out_dir / "bwd_trajectories_vpar.npy", snap_vpar)
-            np.save(out_dir / "bwd_trajectories_H.npy",    snap_H)
-            np.save(out_dir / "bwd_trajectories_time.npy", snap_time)
-            np.save(out_dir / "bwd_trajectories_idx.npy",  bwd_sel)
-
-            write_trajectory_polylines(
-                out_dir / "bwd_trajectories.vtu",
-                initial_xyz=pilot["wall_xyz"][bwd_sel],
-                snap_xyz=snap_xyz, snap_time=snap_time,
-                snap_vpar=snap_vpar, snap_H=snap_H,
-                initial_vpar=pilot["wall_vpar"][bwd_sel],
-                initial_H=pilot["wall_H"][bwd_sel],
-                particle_ids=bwd_sel,
-            )
-
-        # Forward trajectories: subsample of the IS forward draws
-        print("\n--- Forward trajectory snapshots ---")
-        n_traj_fwd = int(min(args.n_trajectory, N))
-        if n_traj_fwd > 0:
-            fwd_sel = rng.choice(N, size=n_traj_fwd, replace=False)
-            snap_xyz, snap_vpar, snap_H, snap_time, _, _ = trace_snapshots(
-                tracer=cartesian_gpu_tracing_drag, field=field,
-                R_init=R_s[fwd_sel], phi_init=phi_s[fwd_sel],
-                Z_init=Z_s[fwd_sel],
-                vpar_init=vpar_s[fwd_sel], H_init=H_s[fwd_sel],
-                mass=MASS, charge=CHARGE, speed_ref=speed_ref,
-                coulomb_log=args.coulomb_log, Te_in_eV=True,
-                tmax=args.tmax_forward_trajectory, tol=args.tol,
-                n_snapshots=int(args.n_snapshots),
-                H_stop=0.0, use_energy_stop=False,
-                label="forward snapshots",
-            )
-            np.save(out_dir / "fwd_trajectories_xyz.npy",  snap_xyz)
-            np.save(out_dir / "fwd_trajectories_vpar.npy", snap_vpar)
-            np.save(out_dir / "fwd_trajectories_H.npy",    snap_H)
-            np.save(out_dir / "fwd_trajectories_time.npy", snap_time)
-            np.save(out_dir / "fwd_trajectories_idx.npy",  fwd_sel)
-
-            write_trajectory_polylines(
-                out_dir / "fwd_trajectories.vtu",
-                initial_xyz=sampled_xyz[fwd_sel],
-                snap_xyz=snap_xyz, snap_time=snap_time,
-                snap_vpar=snap_vpar, snap_H=snap_H,
-                initial_vpar=vpar_s[fwd_sel],
-                initial_H=H_s[fwd_sel],
-                particle_ids=fwd_sel,
-            )
 
     # Plots ---------------------------------------------------------------
     pdir = out_dir / "plots"
