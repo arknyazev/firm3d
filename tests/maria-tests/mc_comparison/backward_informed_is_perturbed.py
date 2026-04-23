@@ -169,7 +169,7 @@ def run_backward_pilot(args, field, rng):
     H_high = H_FUSION
 
     tau_s = _slowing_down_time(args.ne0, args.Te0_ev, MASS, args.coulomb_log)
-    tmax_backward = float(1.2 * np.log(H_high / H_low) * tau_s)
+    tmax_backward = float(10 * np.log(H_high / H_low) * tau_s)
     print(f"  tau_s={tau_s:.4e} s, tmax_backward={tmax_backward:.4e} s")
 
     wall_ic = np.loadtxt(str(args.wall_ic_file), comments="#")

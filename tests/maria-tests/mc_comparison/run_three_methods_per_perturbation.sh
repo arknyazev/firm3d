@@ -39,9 +39,9 @@ set -u
 
 # ── Configurable parameters (env overrides) ────────────────────────────────
 PERT_ID=${PERT_ID:-57}
-N_SAMPLES=${N_SAMPLES:-100000}
-N_POOL=${N_POOL:-1000000}
-N_PILOT=${N_PILOT:-1000000}
+N_SAMPLES=${N_SAMPLES:-10000}
+N_POOL=${N_POOL:-50000}
+N_PILOT=${N_PILOT:-100000}
 S_SCORE_NBINS=${S_SCORE_NBINS:-40}
 ALPHA_MIX=${ALPHA_MIX:-0.05}
 SEED=${SEED:-57}
