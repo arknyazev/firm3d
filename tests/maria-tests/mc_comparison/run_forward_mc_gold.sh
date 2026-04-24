@@ -34,7 +34,7 @@ set -u
 # ── Configurable parameters (env overrides) ────────────────────────────────
 PERT_ID=${PERT_ID:-57}
 N_TOTAL=${N_TOTAL:-100000000}     # 100M default; 30M is "match IS SE"
-N_POOL=${N_POOL:-50000}
+N_POOL=${N_POOL:-1000000}
 SEED_BASE=${SEED_BASE:-57}        # shard k uses SEED_BASE + k
 OUT_ROOT=${OUT_ROOT:-/pscratch/sd/m/mariagar/projects/mc_proj/results/mc_comparison}
 
