@@ -11,12 +11,12 @@
 #SBATCH --output=output/slurm_%j.log
 #
 # Runs the three MC-comparison workflows (forward MC, uniform-s IS,
-# backward-informed IS) in parallel on a single 4-GPU node — one process per
-# GPU.  GPU 3 is intentionally left unused (only 3 methods).
+# backward-informed IS) in parallel on a single 4-GPU node — one process per GPU.
 #
 #   GPU 0 : forward_mc_perturbed.py
 #   GPU 1 : uniform_s_is_perturbed.py
 #   GPU 2 : backward_informed_is_perturbed.py
+#   GPU 3 : trajectory tracing with trajectory_viz.py.
 #
 # All three methods share the same perturbation_id (default 57) so the
 # perturbed field, fusion pool, and therefore the target Q are identical
