@@ -87,10 +87,17 @@ def build_boozer_interpolant(boozmn_file, radial_order=3, boozer_degree=3,
     )
 
 
-def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=10_000, progress=True):
+def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=10_000, progress=True,
+                           transformer=None):
     """Convert (R, phi, Z) to (s, theta, zeta) with chunked recursive
     subdivision on conversion failure, so a single bad point only pays its own
-    cost rather than poisoning a whole chunk."""
+    cost rather than poisoning a whole chunk.
+
+    If ``transformer`` (a ``BoozerCoordinateTransformer``) is provided, its
+    method is called directly so the underlying coordinate grid is built
+    once and reused across calls.  Otherwise the module-level
+    ``cylindrical_to_boozer`` is used and a fresh grid is built per call.
+    """
     n = len(rphiz)
     out = np.full_like(rphiz, np.nan)
     failed = 0
@@ -101,7 +108,10 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=10_000, progress=True):
         if len(pts) == 0:
             return
         try:
-            out[idx] = cylindrical_to_boozer(boozer_field, pts)
+            if transformer is not None:
+                out[idx] = transformer.cylindrical_to_boozer(pts)
+            else:
+                out[idx] = cylindrical_to_boozer(boozer_field, pts)
         except RuntimeError:
             if len(pts) == 1:
                 failed += 1
@@ -123,13 +133,14 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=10_000, progress=True):
     return out, failed
 
 
-def ensure_valid_pool(pool, sc_particle, boozer_field):
+def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None):
     """Apply the common filters to produce the "valid fusion birth pool":
     LCFS-inside + finite Boozer s in [0, 1].  Returns (valid_pool,
     s_pool, theta_pool, zeta_pool, diagnostics_dict).
 
     If ``pool`` already has ``s_pre`` from a pre-computed Boozer IC file we
-    reuse it; otherwise we invert (R, phi, Z).
+    reuse it; otherwise we invert (R, phi, Z).  Pass ``transformer`` to
+    reuse a pre-built ``BoozerCoordinateTransformer`` across calls.
     """
     n_input = len(pool["R"])
 
@@ -152,7 +163,9 @@ def ensure_valid_pool(pool, sc_particle, boozer_field):
         rphiz = np.column_stack([R, phi, Z])
         print(f"  converting {len(rphiz)} points to Boozer...")
         t0 = time.time()
-        out, n_bz_failed = _cyl_to_boozer_chunked(boozer_field, rphiz)
+        out, n_bz_failed = _cyl_to_boozer_chunked(
+            boozer_field, rphiz, transformer=transformer,
+        )
         print(f"  Boozer conversion done in {time.time() - t0:.1f}s; "
               f"failures: {n_bz_failed}/{len(rphiz)}")
         s_all     = out[:, 0]
@@ -179,11 +192,12 @@ def ensure_valid_pool(pool, sc_particle, boozer_field):
 
 
 def convert_successes_to_boozer(rphiz, sc_particle, boozer_field,
-                                chunk=10_000):
+                                chunk=10_000, transformer=None):
     """Used by the backward pilot to convert backward-success endpoints to
     Boozer.  Does the same LCFS pre-filter + chunked recursive inversion and
     returns the full-length arrays (with NaN where invalid) plus a validity
-    mask in [0, 1]."""
+    mask in [0, 1].  Pass ``transformer`` to reuse a pre-built
+    ``BoozerCoordinateTransformer`` across calls."""
     n = len(rphiz)
     s_all     = np.full(n, np.nan)
     theta_all = np.full(n, np.nan)
@@ -200,7 +214,8 @@ def convert_successes_to_boozer(rphiz, sc_particle, boozer_field,
         print(f"  converting {len(pts)} backward successes to Boozer...")
         t0 = time.time()
         out, n_bz_failed = _cyl_to_boozer_chunked(boozer_field, pts,
-                                                  chunk=chunk)
+                                                  chunk=chunk,
+                                                  transformer=transformer)
         print(f"  done in {time.time() - t0:.1f}s; "
               f"failures: {n_bz_failed}/{len(pts)}")
         s_all[inside_idx]     = out[:, 0]
