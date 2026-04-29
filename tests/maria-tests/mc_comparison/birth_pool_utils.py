@@ -87,7 +87,7 @@ def build_boozer_interpolant(boozmn_file, radial_order=3, boozer_degree=3,
     )
 
 
-def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=10_000, progress=True,
+def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
                            transformer=None):
     """Convert (R, phi, Z) to (s, theta, zeta) with chunked recursive
     subdivision on conversion failure, so a single bad point only pays its own
@@ -126,10 +126,17 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=10_000, progress=True,
         e = min(s + chunk, n)
         _recurse(rphiz[s:e], idx_all[s:e])
         done += (e - s)
-        if progress and (done % (10 * chunk) == 0 or e == n):
+        if progress:
+            elapsed = time.time() - t0
+            rate = done / max(elapsed, 1e-9)
+            eta = (n - done) / max(rate, 1e-9)
             print(f"    Boozer convert: {done}/{n} "
-                  f"(elapsed {time.time() - t0:.1f}s, "
-                  f"failures so far {failed})")
+                  f"({100 * done / n:5.1f}%, "
+                  f"elapsed {elapsed:6.1f}s, "
+                  f"rate {rate:7.1f} pts/s, "
+                  f"ETA {eta:6.0f}s, "
+                  f"failures so far {failed})",
+                  flush=True)
     return out, failed
 
 
@@ -192,7 +199,7 @@ def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None):
 
 
 def convert_successes_to_boozer(rphiz, sc_particle, boozer_field,
-                                chunk=10_000, transformer=None):
+                                chunk=1_000, transformer=None):
     """Used by the backward pilot to convert backward-success endpoints to
     Boozer.  Does the same LCFS pre-filter + chunked recursive inversion and
     returns the full-length arrays (with NaN where invalid) plus a validity
