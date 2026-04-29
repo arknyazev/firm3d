@@ -79,7 +79,7 @@ def parse_args():
                         "Default 1 ms — long enough for lost particles to "
                         "actually hit the wall, short enough that snapshot "
                         "dt resolves drift orbits.")
-    p.add_argument("--n_snapshots", type=int, default=1000,
+    p.add_argument("--n_snapshots", type=int, default=2000,
                    help="Snapshots per trajectory (~1000 with tmax=1e-3 "
                         "gives dt=1 us = ~15 gyro-periods).")
     p.add_argument("--tol", type=float, default=1e-9)
