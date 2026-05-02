@@ -290,9 +290,9 @@ def run_backward_pilot(args, field, rng):
     # the pool-fallback inversion in ensure_valid_pool below).  The
     # underlying 50^3 coordinate grid is built on first use and cached on
     # the instance.
-    boozer_transformer = BoozerCoordinateTransformer(
-        boozer_field, grid_resolution=(50, 50, 50),
-    )
+    #boozer_transformer = BoozerCoordinateTransformer(
+    #    boozer_field, grid_resolution=(50, 50, 50),
+    #)
 
     if args.score_coordinate == "s":
         # --- Path 1: Boozer s ------------------------------------------------
@@ -302,7 +302,7 @@ def run_backward_pilot(args, field, rng):
         s_all, theta_all, zeta_all, valid, succ_diag = (
             convert_successes_to_boozer(
                 birth_rphiz, field["sc_particle"], boozer_field,
-                transformer=boozer_transformer,
+                #transformer=boozer_transformer,
             )
         )
         M_valid = int(valid.sum())
