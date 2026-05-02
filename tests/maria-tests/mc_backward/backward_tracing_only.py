@@ -475,9 +475,6 @@ birth_xyz   = np.column_stack([X_b, Y_b, Z_b, vpar_b, H_b])
 birth_rphiz = np.column_stack([R_b, phi_b, Z_b])
 np.save(out_dir / "birth_endpoints.npy", birth_xyz)
 np.save(out_dir / "birth_endpoints_rphiz.npy", birth_rphiz)
-np.save("/tmp/bwo_birth_rphiz.npy", birth_rphiz)
-print(f"  [debug] saved birth_rphiz to /tmp/bwo_birth_rphiz.npy "
-      f"shape={birth_rphiz.shape}")
 
 print("  building Boozer interpolant + converting to Boozer...")
 bri = BoozerRadialInterpolant(str(inp.boozmn_file), inp.radial_order, no_K=True)

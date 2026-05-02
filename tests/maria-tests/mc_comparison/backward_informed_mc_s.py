@@ -272,9 +272,6 @@ def run_backward_pilot(args, field, rng):
     R_b = np.sqrt(X_b ** 2 + Y_b ** 2)
     phi_b = np.arctan2(Y_b, X_b)
     birth_rphiz = np.column_stack([R_b, phi_b, Z_b])
-    np.save("/tmp/mcs_birth_rphiz.npy", birth_rphiz)
-    print(f"  [debug] saved birth_rphiz to /tmp/mcs_birth_rphiz.npy "
-          f"shape={birth_rphiz.shape}")
 
     # Always compute signed distance to LCFS (cheap, always finite).  This is
     # needed when score_coordinate == 'sd'; it's also the first stage of the

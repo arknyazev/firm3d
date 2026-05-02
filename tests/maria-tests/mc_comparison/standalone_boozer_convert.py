@@ -14,8 +14,8 @@ If it fails 100% just like the in-script run, the bug is upstream of the
 script-vs-script comparison and we need a different theory.
 
 Run:
-    python standalone_boozer_convert.py                 # uses /tmp/mcs_birth_rphiz.npy
-    INPUT=/tmp/bwo_birth_rphiz.npy python standalone_boozer_convert.py
+    python standalone_boozer_convert.py                # uses ~/mcs_birth_rphiz.npy
+    INPUT=~/bwo_birth_rphiz.npy python standalone_boozer_convert.py
 
 No GPU required; pure-CPU Boozer inversion.
 """
@@ -35,7 +35,8 @@ THIS_DIR = Path(__file__).resolve().parent
 DEFAULT_BOOZMN = (THIS_DIR.parent / "mc_backward" /
                   "LandremanPaulQH_coils" / "boozmn.nc")
 
-INPUT      = Path(os.environ.get("INPUT", "/tmp/mcs_birth_rphiz.npy"))
+INPUT      = Path(os.environ.get("INPUT",
+                                  str(Path.home() / "mcs_birth_rphiz.npy")))
 BOOZMN     = Path(os.environ.get("BOOZMN", str(DEFAULT_BOOZMN)))
 RADIAL_ORD = int(os.environ.get("RADIAL_ORD", 3))
 BZ_DEGREE  = int(os.environ.get("BZ_DEGREE", 3))

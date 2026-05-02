@@ -4,7 +4,7 @@ backward_informed_mc_s, to see whether the two scripts produce identical
 backward-birth points before the cylindrical->Boozer conversion.
 
 Run after both scripts have been executed and have written the .npy files
-to /tmp.  Either path can be overridden via env var:
+to ~/.  Either path can be overridden via env var:
 
     BWO_PATH=/some/where/bwo.npy MCS_PATH=/some/where/mcs.npy \
         python compare_birth_rphiz.py
@@ -15,8 +15,10 @@ from pathlib import Path
 
 import numpy as np
 
-BWO_PATH = Path(os.environ.get("BWO_PATH", "/tmp/bwo_birth_rphiz.npy"))
-MCS_PATH = Path(os.environ.get("MCS_PATH", "/tmp/mcs_birth_rphiz.npy"))
+BWO_PATH = Path(os.environ.get("BWO_PATH",
+                               str(Path.home() / "bwo_birth_rphiz.npy")))
+MCS_PATH = Path(os.environ.get("MCS_PATH",
+                               str(Path.home() / "mcs_birth_rphiz.npy")))
 
 
 def _load(p):
