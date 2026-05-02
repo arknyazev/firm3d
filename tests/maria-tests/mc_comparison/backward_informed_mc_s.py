@@ -365,7 +365,7 @@ def run_backward_pilot(args, field, rng):
         "birth_s_all":      s_all,
         "birth_valid":      valid,
         "boozer_field":       boozer_field,
-        "boozer_transformer": boozer_transformer,
+       # "boozer_transformer": boozer_transformer,
         # Wall IC (all pilot starts)
         "wall_R":           R_wall,
         "wall_phi":         phi_wall,
@@ -426,7 +426,7 @@ def main():
                                 fusion_boozer_file=args.fusion_boozer_file)
     pool, s_pool, theta_pool, zeta_pool, pool_diag = ensure_valid_pool(
         raw_pool, field["sc_particle"], pilot["boozer_field"],
-        transformer=pilot["boozer_transformer"],
+       # transformer=pilot["boozer_transformer"],
     )
     N_pool = len(pool["R"])
     if N_pool == 0:
