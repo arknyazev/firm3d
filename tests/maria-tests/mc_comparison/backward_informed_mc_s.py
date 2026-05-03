@@ -404,7 +404,7 @@ def main():
                                       dtype=np.float64)
 
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
-    np.save(out_dir / "bn_stats.npy", field["bn_stats"])
+    #np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
     # Paraview-friendly exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
@@ -583,8 +583,8 @@ def main():
         "bwd_non_empty_bins":      int((label_hist > 0).sum()),
         "pool_markers_nonzero_score": int(n_nonzero_pool_score),
         "frac_pool_nonzero_score": float(frac_nonzero_score),
-        "bn_mean":                 float(field["bn_stats"][0]),
-        "bn_max":                  float(field["bn_stats"][1]),
+        #"bn_mean":                 float(field["bn_stats"][0]),
+        #"bn_max":                  float(field["bn_stats"][1]),
         "seed":                    int(args.seed),
         "pool_n_input":            pool_diag["n_input"],
         "pool_n_outside_LCFS":     pool_diag["n_outside"],

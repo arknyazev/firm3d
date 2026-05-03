@@ -150,7 +150,7 @@ def build_perturbed_field(cfg, perturbation_id, ne_fun, Te_fun):
         "r_range": r_range, "phi_range": phi_range, "z_range": z_range,
         "cell_quad_pts": cell_quad_pts,
         "phi_min": phirange[0], "phi_max": phirange[1],
-        "bn_stats": bn_stats,
+        #"bn_stats": bn_stats,
     }
 
 
