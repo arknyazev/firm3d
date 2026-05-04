@@ -64,7 +64,7 @@ BACKWARD_TMAX_FACTOR=${BACKWARD_TMAX_FACTOR:-2.0}
 # Default 16: with --ntasks-per-node=4 the four estimator processes share
 # 64 CPU cores on a Perlmutter GPU node, so 16 workers per estimator is
 # the natural fit.  Set to 1 to fall back to the old sequential path.
-N_BOOZER_WORKERS=${N_BOOZER_WORKERS:-16}
+N_BOOZER_WORKERS=${N_BOOZER_WORKERS:-32}
 
 # Trajectory polylines are handled by the separate `trajectory_viz.py`
 # script so that deterministic trajectories aren't re-traced 3x.  When
