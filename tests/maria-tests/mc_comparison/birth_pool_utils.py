@@ -20,6 +20,7 @@ n_particles, VMEC input, boozmn.nc)``, so all three methods operate on the
 identical pool indexing and hence on the same target measure Q.
 """
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +29,10 @@ from firm3d.field.boozermagneticfield import (
     BoozerRadialInterpolant,
     InterpolatedBoozerField,
 )
-from firm3d.field.coordinates import cylindrical_to_boozer
+from firm3d.field.coordinates import (
+    BoozerCoordinateTransformer,
+    cylindrical_to_boozer,
+)
 
 
 def load_fusion_pool(fusion_ic_file, n_particles=None,
@@ -95,18 +99,140 @@ def build_boozer_interpolant(boozmn_file, radial_order=3, boozer_degree=3,
     return bf
 
 
-def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
-                           transformer=None):
-    """Convert (R, phi, Z) to (s, theta, zeta) with chunked recursive
-    subdivision on conversion failure, so a single bad point only pays its own
-    cost rather than poisoning a whole chunk.
+def _worker_convert_chunk(args):
+    """Top-level (picklable) worker for the parallel Boozer-conversion path.
 
-    If ``transformer`` (a ``BoozerCoordinateTransformer``) is provided, its
-    method is called directly so the underlying coordinate grid is built
-    once and reused across calls.  Otherwise the module-level
-    ``cylindrical_to_boozer`` is used and a fresh grid is built per call.
+    Each worker builds its OWN BoozerRadialInterpolant + InterpolatedBoozerField
+    + BoozerCoordinateTransformer from scratch (the C++ field objects are not
+    picklable, so we cannot ship a pre-built one across the fork boundary).
+    Construction takes ~1 minute, paid once per worker, in parallel across
+    workers, so the wall-clock cost is amortized.
+
+    args = (boozmn_file_str, radial_order, boozer_degree, boozer_res, pts, chunk)
+    Returns (out, failed) where out has the same row order as pts.
+    """
+    (boozmn_file_str, radial_order, boozer_degree, boozer_res,
+     pts, chunk) = args
+
+    bri = BoozerRadialInterpolant(boozmn_file_str, radial_order, no_K=True)
+    bf  = InterpolatedBoozerField(
+        bri, boozer_degree,
+        ns_interp=boozer_res, ntheta_interp=boozer_res, nzeta_interp=boozer_res,
+    )
+    bf._bri = bri  # keep bri alive — see build_boozer_interpolant for why
+    transformer = BoozerCoordinateTransformer(bf, grid_resolution=(50, 50, 50))
+
+    n = len(pts)
+    out = np.full_like(pts, np.nan)
+    failed = 0
+    idx_all = np.arange(n)
+
+    def _recurse(p, idx):
+        nonlocal failed
+        if len(p) == 0:
+            return
+        try:
+            out[idx] = transformer.cylindrical_to_boozer(p)
+        except RuntimeError:
+            if len(p) == 1:
+                failed += 1
+                return
+            mid = len(p) // 2
+            _recurse(p[:mid], idx[:mid])
+            _recurse(p[mid:], idx[mid:])
+
+    for s in range(0, n, chunk):
+        e = min(s + chunk, n)
+        _recurse(pts[s:e], idx_all[s:e])
+
+    return out, failed
+
+
+def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
+                           transformer=None, n_workers=1, boozmn_file=None,
+                           radial_order=3, boozer_degree=3, boozer_res=48):
+    """Convert (R, phi, Z) to (s, theta, zeta) with chunked recursive
+    subdivision on conversion failure, so a single bad point only pays its
+    own cost rather than poisoning a whole chunk.
+
+    Two execution modes:
+
+    * ``n_workers <= 1`` (sequential, default): runs in this process.  If
+      ``transformer`` (a ``BoozerCoordinateTransformer``) is provided, its
+      method is called directly so the underlying coordinate grid is built
+      once and reused; otherwise the module-level ``cylindrical_to_boozer``
+      is used.
+
+    * ``n_workers > 1`` *and* ``boozmn_file`` provided: parallel CPU path
+      via ``ProcessPoolExecutor``.  ``rphiz`` is split into ``n_workers``
+      contiguous slices, each worker rebuilds its own boozer_field +
+      transformer and processes its slice independently, results are
+      gathered in input order so the returned ``out`` lines up row-for-row
+      with the input ``rphiz``.  ``transformer`` is ignored on this path
+      (workers cannot inherit it across the fork boundary).
+
+    If ``n_workers > 1`` but ``boozmn_file`` is ``None`` we fall back to
+    sequential silently — workers cannot rebuild boozer_field without it.
     """
     n = len(rphiz)
+    if n == 0:
+        return np.full((0, 3), np.nan), 0
+
+    # ── Parallel path ────────────────────────────────────────────────────
+    if n_workers > 1 and boozmn_file is not None:
+        n_workers = min(n_workers, n)
+        # np.array_split keeps slices in input order, so concatenating the
+        # per-worker outputs in the same order yields a result row-for-row
+        # aligned with the input rphiz.
+        chunks = np.array_split(rphiz, n_workers)
+        args_list = [
+            (str(boozmn_file), radial_order, boozer_degree, boozer_res,
+             c, chunk)
+            for c in chunks
+        ]
+
+        if progress:
+            sizes = [len(c) for c in chunks]
+            print(f"  Boozer convert (parallel): {n_workers} workers on "
+                  f"{n} points, slice sizes "
+                  f"{min(sizes)}-{max(sizes)}/worker; building "
+                  f"per-worker boozer_field (~1 min each, in parallel)...",
+                  flush=True)
+
+        t0 = time.time()
+        results = [None] * n_workers
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            future_to_idx = {
+                ex.submit(_worker_convert_chunk, args): i
+                for i, args in enumerate(args_list)
+            }
+            done_count = 0
+            for fut in as_completed(future_to_idx):
+                i = future_to_idx[fut]
+                results[i] = fut.result()
+                done_count += 1
+                if progress:
+                    elapsed = time.time() - t0
+                    print(f"    worker {i:>2}/{n_workers} done "
+                          f"({done_count}/{n_workers} workers finished, "
+                          f"elapsed {elapsed:6.1f}s, "
+                          f"slice failures {results[i][1]})",
+                          flush=True)
+
+        out = np.concatenate([r[0] for r in results], axis=0)
+        failed = int(sum(r[1] for r in results))
+        if progress:
+            elapsed = time.time() - t0
+            rate = n / max(elapsed, 1e-9)
+            print(f"  Boozer convert: {n}/{n} done in {elapsed:.1f}s "
+                  f"(rate {rate:.1f} pts/s, total failures {failed})",
+                  flush=True)
+        assert out.shape == rphiz.shape, (
+            f"parallel concat shape mismatch: out={out.shape} "
+            f"vs rphiz={rphiz.shape}")
+        return out, failed
+
+    # ── Sequential path ──────────────────────────────────────────────────
     out = np.full_like(rphiz, np.nan)
     failed = 0
     idx_all = np.arange(n)
@@ -148,14 +274,18 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
     return out, failed
 
 
-def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None):
+def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None,
+                      n_workers=1, boozmn_file=None,
+                      radial_order=3, boozer_degree=3, boozer_res=48):
     """Apply the common filters to produce the "valid fusion birth pool":
     LCFS-inside + finite Boozer s in [0, 1].  Returns (valid_pool,
     s_pool, theta_pool, zeta_pool, diagnostics_dict).
 
     If ``pool`` already has ``s_pre`` from a pre-computed Boozer IC file we
     reuse it; otherwise we invert (R, phi, Z).  Pass ``transformer`` to
-    reuse a pre-built ``BoozerCoordinateTransformer`` across calls.
+    reuse a pre-built ``BoozerCoordinateTransformer`` across calls.  Pass
+    ``n_workers > 1`` together with ``boozmn_file`` to run the conversion
+    in parallel CPU processes (only relevant when there is no ``s_pre``).
     """
     n_input = len(pool["R"])
 
@@ -180,6 +310,10 @@ def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None):
         t0 = time.time()
         out, n_bz_failed = _cyl_to_boozer_chunked(
             boozer_field, rphiz, transformer=transformer,
+            n_workers=n_workers, boozmn_file=boozmn_file,
+            radial_order=radial_order,
+            boozer_degree=boozer_degree,
+            boozer_res=boozer_res,
         )
         print(f"  Boozer conversion done in {time.time() - t0:.1f}s; "
               f"failures: {n_bz_failed}/{len(rphiz)}")
@@ -207,12 +341,17 @@ def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None):
 
 
 def convert_successes_to_boozer(rphiz, sc_particle, boozer_field,
-                                chunk=1_000, transformer=None):
+                                chunk=1_000, transformer=None,
+                                n_workers=1, boozmn_file=None,
+                                radial_order=3, boozer_degree=3,
+                                boozer_res=48):
     """Used by the backward pilot to convert backward-success endpoints to
     Boozer.  Does the same LCFS pre-filter + chunked recursive inversion and
     returns the full-length arrays (with NaN where invalid) plus a validity
     mask in [0, 1].  Pass ``transformer`` to reuse a pre-built
-    ``BoozerCoordinateTransformer`` across calls."""
+    ``BoozerCoordinateTransformer`` across calls (sequential mode only).
+    Pass ``n_workers > 1`` together with ``boozmn_file`` to run the
+    conversion in parallel CPU processes."""
     n = len(rphiz)
     s_all     = np.full(n, np.nan)
     theta_all = np.full(n, np.nan)
@@ -228,9 +367,16 @@ def convert_successes_to_boozer(rphiz, sc_particle, boozer_field,
     if len(pts):
         print(f"  converting {len(pts)} backward successes to Boozer...")
         t0 = time.time()
-        out, n_bz_failed = _cyl_to_boozer_chunked(boozer_field, pts,
-                                                  chunk=chunk,
-                                                  transformer=transformer)
+        out, n_bz_failed = _cyl_to_boozer_chunked(
+            boozer_field, pts,
+            chunk=chunk,
+            transformer=transformer,
+            n_workers=n_workers,
+            boozmn_file=boozmn_file,
+            radial_order=radial_order,
+            boozer_degree=boozer_degree,
+            boozer_res=boozer_res,
+        )
         print(f"  done in {time.time() - t0:.1f}s; "
               f"failures: {n_bz_failed}/{len(pts)}")
         s_all[inside_idx]     = out[:, 0]

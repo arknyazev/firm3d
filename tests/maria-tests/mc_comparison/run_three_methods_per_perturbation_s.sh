@@ -58,6 +58,14 @@ SCORE_COORDINATE=${SCORE_COORDINATE:-s}
 # Energy-stop fires first in practice, so this is just headroom.
 BACKWARD_TMAX_FACTOR=${BACKWARD_TMAX_FACTOR:-2.0}
 
+# CPU multiprocessing for the cylindrical->Boozer conversion in
+# backward_informed_mc_s.py.  Each worker rebuilds its own boozer_field
+# upfront in parallel, then handles a slice of the backward birth points.
+# Default 16: with --ntasks-per-node=4 the four estimator processes share
+# 64 CPU cores on a Perlmutter GPU node, so 16 workers per estimator is
+# the natural fit.  Set to 1 to fall back to the old sequential path.
+N_BOOZER_WORKERS=${N_BOOZER_WORKERS:-16}
+
 # Trajectory polylines are handled by the separate `trajectory_viz.py`
 # script so that deterministic trajectories aren't re-traced 3x.  When
 # ENABLE_VIZ=1 (default), we launch it on GPU 3 in parallel with the three
@@ -87,6 +95,7 @@ echo "   SEED           = ${SEED}"
 echo "   OUT_DIR        = ${OUT_DIR}"
 echo "   SCORE_COORD    = ${SCORE_COORDINATE}  (backward-IS score axis)"
 echo "   BWD_TMAX_FAC   = ${BACKWARD_TMAX_FACTOR}"
+echo "   N_BWD_WORKERS  = ${N_BOOZER_WORKERS}  (CPU procs for Boozer conv.)"
 echo "   ENABLE_VIZ     = ${ENABLE_VIZ}  (GPU 3, trajectory_viz.py)"
 echo "============================================================"
 
@@ -120,6 +129,7 @@ CUDA_VISIBLE_DEVICES=2 python backward_informed_mc_s.py \
     --seed                  "${SEED}" \
     --score_coordinate      "${SCORE_COORDINATE}" \
     --backward_tmax_factor  "${BACKWARD_TMAX_FACTOR}" \
+    --n_boozer_workers      "${N_BOOZER_WORKERS}" \
     --out_dir               "${OUT_DIR}/backward_informed_is" \
     > "${LOG_DIR}/backward_informed_is.log" 2>&1 &
 PID_BACK=$!

@@ -136,6 +136,16 @@ def parse_args():
                    help="Multiplier on ln(H_fusion/H_low) * tau_s for the "
                         "backward-pilot tmax.  Energy-stop fires first in "
                         "practice, so this is just headroom.  Default 2.0.")
+    p.add_argument("--n_boozer_workers", type=int, default=1,
+                   help="Number of CPU worker processes for the "
+                        "cylindrical->Boozer conversion (backward pilot "
+                        "endpoints, and pool-fallback when fusion_boozer_file "
+                        "is missing).  1 = sequential.  >1 spawns a "
+                        "ProcessPoolExecutor; each worker rebuilds its own "
+                        "boozer_field (~1 min upfront, in parallel).  "
+                        "Recommended: a divisor of CPUs-per-task in your "
+                        "SLURM allocation (e.g. 8 or 16 on a Perlmutter GPU "
+                        "node with --ntasks-per-node=4).")
     return p.parse_args()
 
 
@@ -303,6 +313,8 @@ def run_backward_pilot(args, field, rng):
             convert_successes_to_boozer(
                 birth_rphiz, field["sc_particle"], boozer_field,
                 transformer=boozer_transformer,
+                n_workers=args.n_boozer_workers,
+                boozmn_file=args.boozmn_file,
             )
         )
         M_valid = int(valid.sum())
@@ -427,6 +439,8 @@ def main():
     pool, s_pool, theta_pool, zeta_pool, pool_diag = ensure_valid_pool(
         raw_pool, field["sc_particle"], pilot["boozer_field"],
         transformer=pilot["boozer_transformer"],
+        n_workers=args.n_boozer_workers,
+        boozmn_file=args.boozmn_file,
     )
     N_pool = len(pool["R"])
     if N_pool == 0:
