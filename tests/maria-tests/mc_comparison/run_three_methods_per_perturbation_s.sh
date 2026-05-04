@@ -7,7 +7,7 @@
 #SBATCH --gpus-per-task=1
 #SBATCH --gpu-bind=none
 #SBATCH --qos=regular
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=output/slurm_%j.log
 #
 # Runs the three MC-comparison workflows (forward MC, uniform-s IS,
@@ -41,7 +41,7 @@ set -u
 PERT_ID=${PERT_ID:-0}   # no perturbation run
 N_SAMPLES=${N_SAMPLES:-50000}
 N_POOL=${N_POOL:-1000000}
-N_PILOT=${N_PILOT:-100000}
+N_PILOT=${N_PILOT:-30000}
 S_SCORE_NBINS=${S_SCORE_NBINS:-50}
 ALPHA_MIX=${ALPHA_MIX:-0.05}
 SEED=${SEED:-57}
