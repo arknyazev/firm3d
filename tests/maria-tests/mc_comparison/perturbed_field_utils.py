@@ -47,7 +47,7 @@ class FieldConfig:
     ncoils: int = 5
     current: float = 1.27797548115612e7
     coil_order: int = 20
-    sigma: float = 1e-2
+    sigma: float = 1e-3
     length: float = 0.5
     # Interpolation grid
     n_r: int = 64
