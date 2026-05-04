@@ -52,7 +52,11 @@ from firm3dpp import (
     cartesian_gpu_tracing_backward_drag,
     cartesian_gpu_tracing_drag,
 )
-from firm3d.field.coordinates import BoozerCoordinateTransformer
+from firm3d.field.coordinates import (
+    BoozerCoordinateTransformer,
+    boozer_to_cylindrical,
+    cylindrical_to_boozer as _cyl_to_bz,
+)
 
 from perturbed_field_utils import (
     FieldConfig, build_perturbed_field, flatten_stz, wrap_phi,
@@ -284,6 +288,24 @@ def run_backward_pilot(args, field, rng):
     # back to live conversion if the pre-computed fusion-boozer file is
     # missing.  Build it here regardless of score_coordinate.
     boozer_field = build_boozer_interpolant(args.boozmn_file)
+
+    # ── DEBUG: synthetic round-trip smoke test ────────────────────────────
+    # If boozer_field is healthy, (s,theta,zeta) -> (R,phi,Z) -> (s,theta,zeta)
+    # should reproduce the input within ftol.  If THIS fails, boozer_field is
+    # corrupted and the in-script Boozer state is broken — independent of our
+    # actual birth points.
+    _test_stz = np.array([[0.5, 0.0, 0.0]])
+    _test_rphiz = boozer_to_cylindrical(boozer_field, _test_stz)
+    print(f"  [SMOKE] (s=0.5,th=0,ze=0) -> (R={_test_rphiz[0,0]:.4f}, "
+          f"phi={_test_rphiz[0,1]:.4f}, Z={_test_rphiz[0,2]:.4f})")
+    try:
+        _back = _cyl_to_bz(boozer_field, _test_rphiz)
+        print(f"  [SMOKE] round-trip back -> (s={_back[0,0]:.4f}, "
+              f"th={_back[0,1]:.4f}, ze={_back[0,2]:.4f})  "
+              f"=> {'OK' if abs(_back[0,0] - 0.5) < 1e-3 else 'WRONG'}")
+    except RuntimeError as _e:
+        print(f"  [SMOKE] round-trip FAILED with RuntimeError: {_e}")
+    # ── /DEBUG ────────────────────────────────────────────────────────────
 
     # Build the coordinate transformer once and reuse it for every
     # cylindrical_to_boozer call in this run (backward successes here, and
