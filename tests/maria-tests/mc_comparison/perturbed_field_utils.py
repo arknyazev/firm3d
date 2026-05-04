@@ -115,12 +115,12 @@ def build_perturbed_field(cfg, perturbation_id, ne_fun, Te_fun):
     )
 
     # B·n diagnostic on the LCFS
-    #bs.set_points(s_input.gamma().reshape((-1, 3)))
-    #B  = bs.B().reshape((cfg.nphi_surf, cfg.ntheta_surf, 3))
-    #BN = np.sum(B * s_input.unitnormal(), axis=2)
-    #rel = np.abs(BN) / np.linalg.norm(B, axis=2)
-    #print(f"B*n check: mean |B*n|/|B| = {rel.mean():.4e}, max = {rel.max():.4e}")
-    #bn_stats = np.array([float(rel.mean()), float(rel.max())])
+    bs.set_points(s_input.gamma().reshape((-1, 3)))
+    B  = bs.B().reshape((cfg.nphi_surf, cfg.ntheta_surf, 3))
+    BN = np.sum(B * s_input.unitnormal(), axis=2)
+    rel = np.abs(BN) / np.linalg.norm(B, axis=2)
+    print(f"B*n check: mean |B*n|/|B| = {rel.mean():.4e}, max = {rel.max():.4e}")
+    bn_stats = np.array([float(rel.mean()), float(rel.max())])
 
     sc_particle = SurfaceClassifier(s_input, h=cfg.sc_h, p=cfg.sc_p)
 
@@ -150,7 +150,7 @@ def build_perturbed_field(cfg, perturbation_id, ne_fun, Te_fun):
         "r_range": r_range, "phi_range": phi_range, "z_range": z_range,
         "cell_quad_pts": cell_quad_pts,
         "phi_min": phirange[0], "phi_max": phirange[1],
-        #"bn_stats": bn_stats,
+        "bn_stats": bn_stats,
     }
 
 
