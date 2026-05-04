@@ -289,6 +289,14 @@ def run_backward_pilot(args, field, rng):
     # missing.  Build it here regardless of score_coordinate.
     boozer_field = build_boozer_interpolant(args.boozmn_file)
 
+    # ── DEBUG: type/class inspection ──────────────────────────────────────
+    print(f"  [TYPE] type(boozer_field) = {type(boozer_field).__name__}")
+    print(f"  [TYPE] MRO = {[c.__name__ for c in type(boozer_field).__mro__]}")
+    print(f"  [TYPE] field_type = {boozer_field.field_type!r}")
+    print(f"  [TYPE] hasattr R = {hasattr(boozer_field, 'R')}, "
+          f"hasattr _R_impl = {hasattr(boozer_field, '_R_impl')}")
+    # ── /DEBUG ────────────────────────────────────────────────────────────
+
     # ── DEBUG: synthetic round-trip smoke test ────────────────────────────
     # If boozer_field is healthy, (s,theta,zeta) -> (R,phi,Z) -> (s,theta,zeta)
     # should reproduce the input within ftol.  If THIS fails, boozer_field is
