@@ -79,12 +79,20 @@ def filter_inside_lcfs(pool, sc_particle):
 def build_boozer_interpolant(boozmn_file, radial_order=3, boozer_degree=3,
                              boozer_res=48):
     bri = BoozerRadialInterpolant(str(boozmn_file), radial_order, no_K=True)
-    return InterpolatedBoozerField(
+    bf = InterpolatedBoozerField(
         bri, boozer_degree,
         ns_interp=boozer_res,
         ntheta_interp=boozer_res,
         nzeta_interp=boozer_res,
     )
+    # Keep bri alive for as long as bf lives.  InterpolatedBoozerField does
+    # not hold a strong Python reference to its source BoozerRadialInterpolant
+    # (only a C++ pointer), so without this attach the Python `bri` wrapper
+    # gets garbage-collected when this function returns and subsequent calls
+    # like bf.R() fall back to the base-class `_R_impl` stub
+    # ("_R_impl was not implemented").
+    bf._bri = bri
+    return bf
 
 
 def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
