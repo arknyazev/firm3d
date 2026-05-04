@@ -52,11 +52,7 @@ from firm3dpp import (
     cartesian_gpu_tracing_backward_drag,
     cartesian_gpu_tracing_drag,
 )
-from firm3d.field.coordinates import (
-    BoozerCoordinateTransformer,
-    boozer_to_cylindrical,
-    cylindrical_to_boozer as _cyl_to_bz,
-)
+from firm3d.field.coordinates import BoozerCoordinateTransformer
 
 from perturbed_field_utils import (
     FieldConfig, build_perturbed_field, flatten_stz, wrap_phi,
@@ -289,32 +285,6 @@ def run_backward_pilot(args, field, rng):
     # missing.  Build it here regardless of score_coordinate.
     boozer_field = build_boozer_interpolant(args.boozmn_file)
 
-    # ── DEBUG: type/class inspection ──────────────────────────────────────
-    print(f"  [TYPE] type(boozer_field) = {type(boozer_field).__name__}")
-    print(f"  [TYPE] MRO = {[c.__name__ for c in type(boozer_field).__mro__]}")
-    print(f"  [TYPE] field_type = {boozer_field.field_type!r}")
-    print(f"  [TYPE] hasattr R = {hasattr(boozer_field, 'R')}, "
-          f"hasattr _R_impl = {hasattr(boozer_field, '_R_impl')}")
-    # ── /DEBUG ────────────────────────────────────────────────────────────
-
-    # ── DEBUG: synthetic round-trip smoke test ────────────────────────────
-    # If boozer_field is healthy, (s,theta,zeta) -> (R,phi,Z) -> (s,theta,zeta)
-    # should reproduce the input within ftol.  If THIS fails, boozer_field is
-    # corrupted and the in-script Boozer state is broken — independent of our
-    # actual birth points.
-    _test_stz = np.array([[0.5, 0.0, 0.0]])
-    _test_rphiz = boozer_to_cylindrical(boozer_field, _test_stz)
-    print(f"  [SMOKE] (s=0.5,th=0,ze=0) -> (R={_test_rphiz[0,0]:.4f}, "
-          f"phi={_test_rphiz[0,1]:.4f}, Z={_test_rphiz[0,2]:.4f})")
-    try:
-        _back = _cyl_to_bz(boozer_field, _test_rphiz)
-        print(f"  [SMOKE] round-trip back -> (s={_back[0,0]:.4f}, "
-              f"th={_back[0,1]:.4f}, ze={_back[0,2]:.4f})  "
-              f"=> {'OK' if abs(_back[0,0] - 0.5) < 1e-3 else 'WRONG'}")
-    except RuntimeError as _e:
-        print(f"  [SMOKE] round-trip FAILED with RuntimeError: {_e}")
-    # ── /DEBUG ────────────────────────────────────────────────────────────
-
     # Build the coordinate transformer once and reuse it for every
     # cylindrical_to_boozer call in this run (backward successes here, and
     # the pool-fallback inversion in ensure_valid_pool below).  The
@@ -420,19 +390,6 @@ def main():
     (out_dir / "plots").mkdir(parents=True, exist_ok=True)
     print(f"Writing outputs to {out_dir}")
 
-    # ── DEBUG: probe R() at three points to bisect when it breaks ────────
-    def _probe_R(label):
-        from birth_pool_utils import build_boozer_interpolant
-        try:
-            bf = build_boozer_interpolant(args.boozmn_file)
-            bf.set_points(np.array([[0.5, 0.0, 0.0]]))
-            R = bf.R()
-            print(f"  [PROBE-{label}] R() OK: {R[0,0]:.6f}", flush=True)
-        except RuntimeError as e:
-            print(f"  [PROBE-{label}] R() FAILED: {e}", flush=True)
-    _probe_R("A_top_of_main")
-    # ── /DEBUG ────────────────────────────────────────────────────────────
-
     alpha = float(args.alpha_mix)
     if not (0.0 < alpha <= 1.0):
         raise ValueError(f"alpha_mix must satisfy 0 < alpha <= 1, got {alpha}")
@@ -449,12 +406,8 @@ def main():
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
     #np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
-    _probe_R("B_after_build_perturbed_field")
-
     # Paraview-friendly exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
-
-    _probe_R("C_after_write_vtk")
 
     rng = np.random.default_rng(args.seed)
 
