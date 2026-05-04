@@ -8,7 +8,8 @@
 #SBATCH --gpu-bind=none
 #SBATCH --qos=regular
 #SBATCH --time=04:00:00
-#SBATCH --output=output/slurm_%j.log
+#SBATCH --output=/pscratch/sd/m/mariagar/projects/mc_proj/results/mc_comparison/slurm_logs/slurm_%j.log
+
 #
 # Runs the three MC-comparison workflows (forward MC, uniform-s IS,
 # backward-informed IS) in parallel on a single 4-GPU node — one process per GPU.
