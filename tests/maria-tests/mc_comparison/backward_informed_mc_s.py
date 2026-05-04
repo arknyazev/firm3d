@@ -420,6 +420,19 @@ def main():
     (out_dir / "plots").mkdir(parents=True, exist_ok=True)
     print(f"Writing outputs to {out_dir}")
 
+    # ── DEBUG: probe R() at three points to bisect when it breaks ────────
+    def _probe_R(label):
+        from birth_pool_utils import build_boozer_interpolant
+        try:
+            bf = build_boozer_interpolant(args.boozmn_file)
+            bf.set_points(np.array([[0.5, 0.0, 0.0]]))
+            R = bf.R()
+            print(f"  [PROBE-{label}] R() OK: {R[0,0]:.6f}", flush=True)
+        except RuntimeError as e:
+            print(f"  [PROBE-{label}] R() FAILED: {e}", flush=True)
+    _probe_R("A_top_of_main")
+    # ── /DEBUG ────────────────────────────────────────────────────────────
+
     alpha = float(args.alpha_mix)
     if not (0.0 < alpha <= 1.0):
         raise ValueError(f"alpha_mix must satisfy 0 < alpha <= 1, got {alpha}")
@@ -436,8 +449,12 @@ def main():
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
     #np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
+    _probe_R("B_after_build_perturbed_field")
+
     # Paraview-friendly exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
+
+    _probe_R("C_after_write_vtk")
 
     rng = np.random.default_rng(args.seed)
 
