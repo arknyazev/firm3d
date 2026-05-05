@@ -108,7 +108,7 @@ def parse_args():
                    default=Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/"
                                 "initial_conditions_surface_cylindrical.txt"))
     p.add_argument("--out_dir", type=Path, default=None)
-    p.add_argument("--H_low_MeV", type=float, default=1.0,
+    p.add_argument("--H_low_MeV", type=float, default=3.0,
                    help="Lower bound on wall energy for backward pilot.")
     p.add_argument("--tmax_forward", type=float, default=1e-2)
     p.add_argument("--tol", type=float, default=1e-9)
