@@ -6,33 +6,39 @@ from backward tracing?
 Pipeline
 --------
 1. Load wall IC (R, phi, Z) from 3_IC_sample_wall/outputs/
-   initial_conditions_surface_cylindrical.txt.  Positions only — energy and
+   initial_conditions_surface_cylindrical.txt.  Positions only - energy and
    pitch are sampled here:
-     - H_wall ~ Uniform(3.0 MeV, 3.5 MeV)
-     - lambda ~ Uniform(-1, 1);  v_par = lambda * sqrt(2 H_wall / m)
-2. Build the Biot-Savart field, LCFS classifier, and GPU drag interpolant
-   exactly the way 2_tracing_gpu / backward_informed_mc.py do.
+     - H_wall ~ Uniform(3.0 MeV, H_fusion)
+     - |lambda| ~ Uniform(0, 1), then signed so the parallel velocity points
+       into the plasma at the wall, i.e. (v_par b_hat) dot n_out <= 0, with
+       v_par = lambda * sqrt(2 H_wall / m)
+2. Build the Biot-Savart field and LCFS SurfaceClassifier the same way as in 2_tracing_gpu/tracing_gpu.py,
+   then build the GPU drag interpolant with cartesian_interpolant_drag using
+   constant ne / Te profiles.
 3. Trace backward with drag from each wall state until one of:
      stop_code 0: tmax
      stop_code 1: wall hit
-     stop_code 2: H reaches H_fusion  (success — "backward-born")
+     stop_code 2: H reaches H_fusion  (success - "backward-born")
      stop_code 3: invalid
 4. Endpoints with stop_code == 2 are the successful "birth" points.
    Convert their (R, phi, Z) to Boozer (s, theta, zeta).  A birth point is
-   considered to have "valid Boozer coordinates" iff 0 <= s <= 1.
-5. Report fraction reaching H_fusion, and fraction reaching H_fusion AND
+   considered to have valid Boozer coordinates if 0 <= s <= 1.
+5. Report fraction reaching H_fusion, and fraction reaching H_fusion +
    having valid Boozer coordinates.  Write CSV, VTK, matplotlib plots.
 
-Outputs (timestamped dir under "mc_proj" / "results" / "backward_only" / timestamp
+Outputs (timestamped dir under "mc_proj" / "results" / "backward_only" / timestamp)
 ------------------------------------------------------
   backward_results.npy             (n_wall, 7) full tracer output
   wall_starts_xyz.npy              (n_wall, 3) wall IC used
   wall_starts_state.npy            (n_wall, 5): X,Y,Z,vpar,H
+  final_energy_stats.csv           per-stop-code final-energy statistics
   birth_endpoints.npy              (M, 5): X,Y,Z,vpar,H  (stop_code==2)
   birth_endpoints_rphiz.npy        (M, 3): R, phi, Z
   birth_endpoints_boozer.npy       (M, 3): s, theta, zeta
   valid_boozer_mask.npy            (M,) bool  (0<=s<=1)
-  trajectory_*.vtu                 Paraview point-cloud outputs
+  wall_starts.vtu / birth_endpoints*.vtu / trajectory_segments.vtu /
+  trajectories.vtu                 Paraview point-cloud and polyline outputs
+  trajectories_*.npy               time-resolved snapshots for an n_trajectory subsample
   summary.csv                      Success metrics
   plots/                           matplotlib figures
 """
@@ -94,7 +100,7 @@ class Inputs:
     current:    float = 1.27797548115612e7
     coil_order: int   = 20
 
-    # Interpolant grid (matching 2_tracing_gpu conventions)
+    # Interpolant grid
     n_r:    int = 64
     n_phi:  int = 128
     n_z:    int = 64
@@ -125,8 +131,7 @@ class Inputs:
     # Tracing
     n_wall:         int   = 1000
     # Subsample of successful (stop_code==2) particles to re-trace with
-    # snapshots to save real time-resolved trajectories.  Kept far smaller
-    # than n_wall because each snapshot re-runs the tracer from t=0.
+    # snapshots to save real time-resolved trajectories
     n_trajectory:   int   = 200
     n_snapshots:    int   = 100
     # tmax_backward is recomputed below from slowing-down time and H range
@@ -170,7 +175,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 print(f"Writing outputs to {out_dir}")
 
 
-# ── Helpers (reusing from previous scripts) ─────
+# ── Helpers (reusing from other folders) ─────
 
 def wrap_phi(phi, phi_min, phi_max):
     period = phi_max - phi_min
@@ -191,7 +196,6 @@ def Te_fun(rphiz):
 
 
 def write_points_vtu(filename, xyz, point_data=None):
-    """Point-cloud .vtu writer matching 2_tracing_gpu/export_points_vtk.py."""
     npts = len(xyz)
     if npts == 0:
         print(f"  (skip {filename.name}: no points)")
@@ -317,8 +321,6 @@ phi_wall = wrap_phi(phi_wall, phi_min, phi_max)
 
 
 # ── Pitch sampling: parallel velocity must point into the plasma at the wall ─
-# Simplified version: v ≈ v_par * b̂ (drifts dropped). Require
-# (v_par b̂) · n̂_out ≤ 0 so the particle moves inward at t=0.
 def outward_unit_normal(xyz_wall, eps):
     def sd_xyz(xyz_arr):
         R = np.sqrt(xyz_arr[:, 0] ** 2 + xyz_arr[:, 1] ** 2)
@@ -334,7 +336,7 @@ def outward_unit_normal(xyz_wall, eps):
 
     grad_norm = np.linalg.norm(grad_sd, axis=1, keepdims=True)
     grad_norm[grad_norm == 0.0] = 1.0
-    return -grad_sd / grad_norm   # outward normal if signed distance increases inward
+    return -grad_sd / grad_norm
 
 
 _xyz_wall = np.column_stack([
@@ -357,7 +359,7 @@ H_wall = rng.uniform(inp.H_low, inp.H_high, size=n_wall)
 v_total_w = np.sqrt(2.0 * H_wall / inp.mass)
 
 lam_abs = rng.uniform(0.0, 1.0, size=n_wall)
-lam_wall = -np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out ≤ 0
+lam_wall = -np.sign(b_dot_n) * lam_abs   # makes (v_par b_hat)·n_out <= 0
 
 # fallback where b_hat·n_out is numerically zero
 mask_zero = np.isclose(b_dot_n, 0.0)
@@ -370,7 +372,7 @@ print(f"  (v_par b̂)·n̂_out after sampling: max={_vn_par.max():.3e}  "
       f"mean={_vn_par.mean():.3e}  (all ≤ 0)")
 print(f"  b̂·n̂_out ≈ 0 fallbacks: {int(mask_zero.sum())}")
 
-# Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout the tracer wants
+# Flatten positions to the [R0,phi0,Z0, R1,phi1,Z1,...] layout
 stz_init = np.empty(3 * n_wall, dtype=np.float64)
 stz_init[0::3] = R_wall
 stz_init[1::3] = phi_wall
@@ -484,21 +486,11 @@ boozer_field = InterpolatedBoozerField(
     ntheta_interp=inp.boozer_res,
     nzeta_interp=inp.boozer_res,
 )
-# cylindrical_to_boozer raises a RuntimeError as soon as ONE point in the batch
-# fails (e.g. it sits numerically outside the Boozer s in [0,1] domain).  With
-# 1e6 birth endpoints, the previous per-point fallback was unusably slow.
-#
-# Strategy:
-#   (a) Drop points already known to be outside the LCFS via sc_particle —
-#       they cannot have a valid Boozer s and don't need to be inverted.
-#   (b) Convert the remainder in chunks; on a chunk failure, recursively split
-#       the chunk in half. Only chunks that bottom-out at a single bad point
-#       pay the per-point cost. This is O(N + B log C) with tiny B in practice.
 
 boozer_coords = np.full_like(birth_rphiz, np.nan)
 n_failed_bz = 0
 
-# (a) Cheap LCFS pre-filter on birth endpoints
+# Cheap LCFS pre-filter on birth endpoints
 sd_birth = sc_particle.evaluate_rphiz(birth_rphiz).ravel()
 inside_birth = sd_birth >= 0
 n_outside_birth = int((~inside_birth).sum())
@@ -508,9 +500,9 @@ if n_outside_birth:
 inside_idx = np.where(inside_birth)[0]
 to_convert = birth_rphiz[inside_idx]
 
-# (b) Chunked conversion with recursive subdivision on failure
+# Chunked conversion with recursive subdivision on failure
 def _convert_chunked(field, pts, idx_global, chunk=10_000):
-    """Fill boozer_coords[idx_global] in-place; return number of failures."""
+    """Fill boozer_coords[idx_global] in-place & return number of failures."""
     failed = 0
     n = len(pts)
     starts = range(0, n, chunk)
@@ -528,7 +520,7 @@ def _convert_chunked(field, pts, idx_global, chunk=10_000):
     return failed
 
 def _convert_recurse(field, pts, idx_global):
-    """Try to convert a contiguous block; recurse on failure."""
+    """Try to convert a contiguous block, recurse on failure."""
     if len(pts) == 0:
         return 0
     try:
@@ -634,14 +626,7 @@ tree.write(str(out_dir / "trajectory_segments.vtu"),
 print(f"  wrote trajectory_segments.vtu ({M} segments)")
 
 
-# ── Step 5b: full time-resolved trajectories for a subsample of successes ────
-# Re-run the backward tracer for a small subsample of particles that reached
-# H_fusion (stop_code == 2), sweeping tmax from ~0 up to inp.tmax_backward.
-# Each call returns the end state at that tmax; stacking across calls yields a
-# (n_traj, n_snap, ...) trajectory array.  use_energy_stop stays True, so a
-# particle that hit H_fusion before a given snapshot's tmax remains frozen at
-# its birth endpoint for later snapshots (matches the segments output).
-
+# ── full time-resolved trajectories for a subsample of successes ────
 print("\n--- STEP 5b: trajectory snapshots for subsample of successes ---")
 n_traj = int(min(inp.n_trajectory, M))
 if n_traj == 0:
@@ -706,9 +691,6 @@ else:
     print(f"  wrote trajectories_*.npy  "
           f"(n_traj={n_traj}, n_snap={inp.n_snapshots})")
 
-    # Paraview polyline export: one VTK_POLY_LINE per particle, prepended with
-    # the wall start point (t=0) so each polyline begins at the wall IC and
-    # ends at the birth endpoint.
     wall_xyz_traj = wall_xyz[traj_sel]
     pts_per = 1 + inp.n_snapshots
     pts = np.empty((n_traj, pts_per, 3), dtype=np.float64)
