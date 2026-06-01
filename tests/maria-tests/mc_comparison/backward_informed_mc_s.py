@@ -19,13 +19,9 @@ Stage B — build score + proposal on fusion pool
      (uniform bins on [0,1]).  Counts = s_hist.
   7. For each fusion pool marker in bin b_i, score_i = s_hist[b_i].
   8. q_tilde_i = (1 - alpha_mix) * score_i + alpha_mix.   (alpha_mix > 0
-     guarantees strictly positive proposal mass on every pool marker —
+     guarantees strictly positive mass on every pool marker,
      independent of what the backward pilot did or didn't find.)
   9. q_i = q_tilde_i / sum_j q_tilde_j.
-
-IMPORTANT: the target is the empirical uniform on the valid fusion pool —
-the backward cloud is only pilot information used to shape the proposal.
-NO reactivity weighting is applied on top of fusion_ic_file.
 
 Estimator
 ---------
@@ -117,14 +113,6 @@ def parse_args():
     p.add_argument("--Te0_ev", type=float, default=100.0)
     p.add_argument("--coulomb_log", type=float, default=17.0)
     p.add_argument("--normal_fd_eps", type=float, default=1e-4)
-    # ── Score-coordinate toggle ────────────────────────────────────────────
-    # Default is 's' (Boozer flux label, [0, 1]).  A reusable
-    # BoozerCoordinateTransformer is built once and shared across all
-    # cylindrical->Boozer inversions in the run, so the per-call grid
-    # rebuild that previously made this path slow no longer applies.
-    # Pass --score_coordinate sd to fall back to signed-distance-to-LCFS
-    # (always defined; does not require Boozer) — useful if Boozer Newton
-    # inversion degenerates at s ≈ 1 under short tau_s.
     p.add_argument("--score_coordinate", type=str, default="s",
                    choices=["s", "sd"],
                    help="Coordinate for the 1-D score histogram. "
@@ -140,12 +128,7 @@ def parse_args():
                    help="Number of CPU worker processes for the "
                         "cylindrical->Boozer conversion (backward pilot "
                         "endpoints, and pool-fallback when fusion_boozer_file "
-                        "is missing).  1 = sequential.  >1 spawns a "
-                        "ProcessPoolExecutor; each worker rebuilds its own "
-                        "boozer_field (~1 min upfront, in parallel).  "
-                        "Recommended: a divisor of CPUs-per-task in your "
-                        "SLURM allocation (e.g. 8 or 16 on a Perlmutter GPU "
-                        "node with --ntasks-per-node=4).")
+                        "is missing)")
     return p.parse_args()
 
 
@@ -283,32 +266,23 @@ def run_backward_pilot(args, field, rng):
     phi_b = np.arctan2(Y_b, X_b)
     birth_rphiz = np.column_stack([R_b, phi_b, Z_b])
 
-    # Always compute signed distance to LCFS (cheap, always finite).  This is
-    # needed when score_coordinate == 'sd'; it's also the first stage of the
-    # 's'-path's validity filter, so we compute it once and reuse.
+    # distance to LCFS and Boozer interpolant are always computed because 
+    # we need them regardless of the score_coordinate chosen
     sd_birth_all = field["sc_particle"].evaluate_rphiz(birth_rphiz).ravel()
     inside_birth = sd_birth_all >= 0.0
     n_outside_birth = int((~inside_birth).sum())
-
-    # Boozer interpolant is still needed so that ensure_valid_pool can fall
-    # back to live conversion if the pre-computed fusion-boozer file is
-    # missing.  Build it here regardless of score_coordinate.
     boozer_field = build_boozer_interpolant(args.boozmn_file)
 
     # Build the coordinate transformer once and reuse it for every
     # cylindrical_to_boozer call in this run (backward successes here, and
-    # the pool-fallback inversion in ensure_valid_pool below).  The
-    # underlying 50^3 coordinate grid is built on first use and cached on
-    # the instance.
+    # the pool-fallback inversion in ensure_valid_pool below)
     boozer_transformer = BoozerCoordinateTransformer(
         boozer_field, grid_resolution=(50, 50, 50),
     )
 
     if args.score_coordinate == "s":
         # --- Path 1: Boozer s ------------------------------------------------
-        # Invert each backward endpoint to get (s, theta, zeta).  Requires
-        # cylindrical_to_boozer to converge — fails when endpoints cluster
-        # near s=1 under short tau_s.
+        # Invert each backward endpoint to get (s, theta, zeta)
         s_all, theta_all, zeta_all, valid, succ_diag = (
             convert_successes_to_boozer(
                 birth_rphiz, field["sc_particle"], boozer_field,
@@ -323,15 +297,12 @@ def run_backward_pilot(args, field, rng):
         print(f"  backward valid Boozer s: {M_valid}/{M}")
     else:
         # --- Path 2: signed distance to LCFS --------------------------------
-        # Bypass Boozer inversion entirely.  sd is defined everywhere in the
-        # Cartesian interpolation domain.  A success is "valid" iff its sd is
-        # >= 0 (inside the VMEC LCFS, same as the pool filter).
         valid = inside_birth
         M_valid = int(valid.sum())
         s_all     = np.full(len(birth_rphiz), np.nan)
         theta_all = np.full(len(birth_rphiz), np.nan)
         zeta_all  = np.full(len(birth_rphiz), np.nan)
-        s_success = s_all[valid]   # all NaN (we didn't invert)
+        s_success = s_all[valid]
         score_success = sd_birth_all[valid]
         succ_diag = {
             "n_total":     int(len(birth_rphiz)),
@@ -353,9 +324,6 @@ def run_backward_pilot(args, field, rng):
     for code, count in sc_bwd_counts.items():
         diag[f"bwd_stop_code_{code}_count"] = int(count)
 
-    # Wall IC state (full pilot) and success-subset state, kept so the
-    # trajectory polylines can start at the wall and end at the birth
-    # endpoint without re-running the pilot.
     wall_xyz = np.column_stack([
         R_wall * np.cos(phi_wall), R_wall * np.sin(phi_wall), Z_wall,
     ])
@@ -369,16 +337,15 @@ def run_backward_pilot(args, field, rng):
         "vpar_b":           bwd[hit_fusion, 4],
         "H_b":              bwd[hit_fusion, 5],
         "t_b":              bwd[hit_fusion, 0],
-        "s_success":        s_success,          # Boozer s; all NaN when sd path
-        "score_success":    score_success,       # per-coordinate label values
+        "s_success":        s_success,          # Boozer s, all NaN when sd path
+        "score_success":    score_success,
         "score_coordinate": args.score_coordinate,
-        "sd_birth_all":     sd_birth_all,        # signed distance for all M
+        "sd_birth_all":     sd_birth_all,
         "birth_rphiz":      birth_rphiz,
         "birth_s_all":      s_all,
         "birth_valid":      valid,
         "boozer_field":       boozer_field,
         "boozer_transformer": boozer_transformer,
-        # Wall IC (all pilot starts)
         "wall_R":           R_wall,
         "wall_phi":         phi_wall,
         "wall_Z":           Z_wall,
@@ -418,7 +385,7 @@ def main():
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
     np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
-    # Paraview-friendly exports of the field geometry
+    # Paraview exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
 
     rng = np.random.default_rng(args.seed)
@@ -460,9 +427,8 @@ def main():
 
     # Build the 1-D label axis that backward endpoints and pool markers will
     # be binned into.  Two options, selected by --score_coordinate:
-    #   's'  : Boozer flux label; pool value is s_pool, range is [0, 1].
-    #   'sd' : signed distance to VMEC LCFS; pool value is computed here,
-    #          range is [0, max(sd_pool)] (pool is LCFS-inside so sd >= 0).
+    #   's'  : Boozer flux label
+    #   'sd' : signed distance to VMEC LCFS
     if args.score_coordinate == "s":
         label_pool  = s_pool
         label_edges = np.linspace(0.0, 1.0, args.s_score_nbins + 1)
@@ -496,8 +462,6 @@ def main():
     p_target = 1.0 / float(N_pool)
     w_per_pool_marker = p_target / q
 
-    # Output filenames are coordinate-agnostic so rollback is just a flag
-    # change; a tiny metadata file records which coordinate was used.
     np.save(out_dir / "score_edges.npy",        label_edges)
     np.save(out_dir / "backward_score_hist.npy", label_hist)
     np.save(out_dir / "score_on_pool.npy",      score)
@@ -505,19 +469,13 @@ def main():
     with open(out_dir / "score_coordinate.txt", "w") as f:
         f.write(f"{args.score_coordinate}\n")
 
-    # Also keep the legacy-named files populated for any downstream readers
-    # that still look for `s_edges.npy` / `backward_s_hist.npy`.  Content is
-    # whichever coordinate was used — interpret together with
-    # `score_coordinate.txt`.
+    # interpret together with `score_coordinate.txt` (this could be s_d or s)
+    # (we use filenames with s for legacy files downstream)
     np.save(out_dir / "s_edges.npy",         label_edges)
     np.save(out_dir / "backward_s_hist.npy", label_hist)
 
     # Diagnostic: how much signal does the backward pilot actually give us?
-    # If `score` is zero on every pool marker, q collapses to uniform over the
-    # pool (q_tilde = alpha*ones) and the IS degenerates to plain uniform —
-    # correct but wasting the pilot.  This is the silent-failure mode to
-    # watch for when M_valid is small or backward score and pool score don't
-    # overlap in any bin.
+    # to check if our backward scheme collapses to uniform IS
     n_nonzero_pool_score = int((score > 0).sum())
     frac_nonzero_score   = n_nonzero_pool_score / max(N_pool, 1)
 
@@ -529,12 +487,12 @@ def main():
     print(f"  pool markers with    : {n_nonzero_pool_score}/{N_pool} "
           f"non-zero score (= {100*frac_nonzero_score:.1f}%)")
     if n_nonzero_pool_score == 0:
-        print("  WARNING: backward pilot gave zero score on EVERY pool "
-              "marker -- proposal collapses to uniform, IS is effectively "
+        print("  WARNING: backward pilot gave zero score on every pool "
+              "marker -- proposal collapses to uniform, IS is "
               "equivalent to forward MC for this run.")
     elif frac_nonzero_score < 0.1:
         print("  NOTE: <10% of pool markers have non-zero backward score; "
-              "proposal is very concentrated, ESS may be small.")
+              "proposal is very concentrated.")
     print(f"  q support            : {int((q > 0).sum())}/{N_pool} "
           f"(should equal N_pool when alpha>0)")
     print(f"  q min / max          : {q.min():.3e} / {q.max():.3e}")
@@ -627,7 +585,7 @@ def main():
                      point_data={"H_init":    pilot["wall_H"],
                                  "vpar_init": pilot["wall_vpar"]})
 
-    # Backward-success endpoints (labelled with Boozer validity)
+    # Backward-success endpoints
     X_be = pilot["R_b"] * np.cos(pilot["phi_b"])
     Y_be = pilot["R_b"] * np.sin(pilot["phi_b"])
     birth_xyz = np.column_stack([X_be, Y_be, pilot["Z_b"]])
@@ -639,7 +597,7 @@ def main():
                                                      .astype(np.float64),
                                  "t_elapsed":    pilot["t_b"]})
 
-    # Sampled births (drawn from q) and forward endpoints
+    # Sampled births and forward endpoints
     X_s = R_s * np.cos(phi_s); Y_s = R_s * np.sin(phi_s)
     sampled_xyz = np.column_stack([X_s, Y_s, Z_s])
     write_points_vtu(out_dir / "sampled_births.vtu", sampled_xyz,
@@ -662,8 +620,7 @@ def main():
     plot_xy_rz(pdir / "sampled_XY_RZ.png", R_s, phi_s, Z_s,
                f"backward-IS samples (N={N})", color="C3")
 
-    # Always show the Boozer-s distribution of the pool (it's well-defined
-    # from the pre-computed IC file regardless of score coordinate).
+    # Boozer-s distribution is defined regardless of score coordinate
     plot_s_hist(pdir / "pool_s_hist.png", s_pool,
                 "Valid fusion pool — s distribution")
     plot_s_hist(pdir / "sampled_s_hist.png", s_pool[sample_idx],
@@ -673,13 +630,11 @@ def main():
                      "backward-IS weights",
                      ess=w_diag["effective_sample_size"])
 
-    # Inline plots for the coordinate actually used (label_*), so the axes
-    # and histogram bounds match whether we used 's' or 'sd'.
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # (a) backward-pilot histogram on the chosen coordinate
+    # backward-pilot histogram on the chosen coordinate
     fig, ax = plt.subplots(figsize=(7, 4))
     centers = 0.5 * (label_edges[:-1] + label_edges[1:])
     width = (centers[1] - centers[0]) * 0.95 if len(centers) > 1 else 1.0
@@ -690,36 +645,14 @@ def main():
     ax.set_title(f"Backward pilot histogram ({args.score_coordinate})")
     ax.legend()
     fig.tight_layout()
-    # Keep the legacy filename `backward_s_hist.png` AND save a coord-
-    # specific one alongside, so users know which was produced.
-    fig.savefig(pdir / "backward_s_hist.png", dpi=150)
     fig.savefig(pdir / f"backward_{args.score_coordinate}_hist.png", dpi=150)
     plt.close(fig)
 
-    # (b) density histogram of the backward-success label values
+
+    # overlay: backward-pilot histogram vs pool-marker distribution
     fig, ax = plt.subplots(figsize=(7, 4))
     vals = pilot["score_success"]
     vals = vals[np.isfinite(vals)]
-    if vals.size:
-        ax.hist(np.clip(vals, label_edges[0], label_edges[-1]),
-                bins=label_edges, density=True, alpha=0.7,
-                label=f"samples (n={vals.size})")
-    ax.set_xlim(label_edges[0], label_edges[-1])
-    ax.set_xlabel(label_name)
-    ax.set_ylabel("probability density")
-    ax.set_title(f"Backward-success {args.score_coordinate} distribution "
-                 f"(pilot)")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(pdir / "backward_success_s_hist.png", dpi=150)
-    fig.savefig(pdir / f"backward_success_{args.score_coordinate}_hist.png",
-                dpi=150)
-    plt.close(fig)
-
-    # (c) overlay: backward-pilot histogram vs pool-marker distribution on
-    # the same axis.  This is what actually shows us whether there's overlap
-    # between the pilot's score support and the pool's score support.
-    fig, ax = plt.subplots(figsize=(7, 4))
     if vals.size:
         ax.hist(np.clip(vals, label_edges[0], label_edges[-1]),
                 bins=label_edges, density=True, alpha=0.5, color="C0",
