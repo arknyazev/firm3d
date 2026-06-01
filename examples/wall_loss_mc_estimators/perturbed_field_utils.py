@@ -1,7 +1,7 @@
 """Build the perturbed Biot-Savart field used by the three MC-comparison
 workflows (forward MC, uniform-s IS, backward-informed IS).
 
-The perturbation model is identical to mc_backward/4_robustness/1_trace_perturbed.py:
+The perturbation model is identical to backward_tracing_drag/4_robustness/1_trace_perturbed.py:
 
   * Layer 1 — same Gaussian sample applied to every base
     curve before stellarator-symmetry expansion.

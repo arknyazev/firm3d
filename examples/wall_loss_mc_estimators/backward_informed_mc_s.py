@@ -4,7 +4,7 @@ with perturbed coils.
 
 Stage A — backward pilot
 ------------------------
-Same workflow as ``mc_backward/backward_tracing_only.py`` but on the
+Same workflow as ``backward_tracing_drag/backward_tracing_only.py`` but on the
 perturbed-coil field:
   1. Load wall IC (R, phi, Z).
   2. Sample H_wall ~ U(H_low, H_fusion); sample |lambda| ~ U(0,1) with sign
@@ -66,7 +66,7 @@ from vtk_utils import write_coils_and_surface_vtk, write_points_vtu
 
 
 THIS_DIR = Path(__file__).resolve().parent
-COILS_DIR = THIS_DIR.parent / "mc_backward" / "LandremanPaulQH_coils"
+COILS_DIR = THIS_DIR.parent / "backward_tracing_drag" / "LandremanPaulQH_coils"
 
 
 def parse_args():

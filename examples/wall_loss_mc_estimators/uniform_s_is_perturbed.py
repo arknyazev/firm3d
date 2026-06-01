@@ -54,7 +54,7 @@ from vtk_utils import write_coils_and_surface_vtk, write_points_vtu
 
 
 THIS_DIR = Path(__file__).resolve().parent
-COILS_DIR = THIS_DIR.parent / "mc_backward" / "LandremanPaulQH_coils"
+COILS_DIR = THIS_DIR.parent / "backward_tracing_drag" / "LandremanPaulQH_coils"
 
 
 def parse_args():

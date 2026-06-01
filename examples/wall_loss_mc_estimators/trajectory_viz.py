@@ -47,7 +47,7 @@ from vtk_utils import trace_snapshots, write_coils_and_surface_vtk
 
 
 THIS_DIR = Path(__file__).resolve().parent
-COILS_DIR = THIS_DIR.parent / "mc_backward" / "LandremanPaulQH_coils"
+COILS_DIR = THIS_DIR.parent / "backward_tracing_drag" / "LandremanPaulQH_coils"
 
 # 5 lost + 5 confined pool indices
 # can override on the command line with --viz_indices
