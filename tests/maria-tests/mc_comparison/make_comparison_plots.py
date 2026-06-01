@@ -1,28 +1,10 @@
 #!/usr/bin/env python3
 """Post-processing comparison plots for the three MC workflows.
-
-Reads the timestamped run directory produced by
-``run_three_methods_per_perturbation.sh`` (layout::
-
-    <run_dir>/
-        forward_mc/           metrics_summary.csv, forward_results.npy, ...
-        uniform_s_is/         ...
-        backward_informed_is/ ...
-
-) and writes a set of comparison plots into ``<run_dir>/<out_subdir>/``.
-
-No Python package dependencies outside numpy + matplotlib.  No coupling to
-the estimator scripts — this is pure I/O + plotting.  Optionally also
-reads a gold FWD directory (produced by ``run_forward_mc_gold.sh`` +
-``combine_forward_mc.py``) and overlays it where relevant.
-
-Plots produced
---------------
-    qhat_bars.png           Q_hat ± 2 SE, one bar per method
+    qhat_bars.png           Q_hat +- 2 SE, one bar per method
     running_qhat.png        running Q_hat(1:k) convergence per method
     ntarget_vs_cv.png       samples required to reach target CV (log-log)
     sampled_births.png      (XY, RZ) sampled-birth distribution per method
-    weight_hists.png        IS weight distributions (UNIF_S_IS + BACKWARD_IS)
+    weight_hists.png        IS weight distributions
     wall_hit_locations.png  (XY, RZ) where the wall-hit samples hit
     bootstrap.png           bootstrap distribution of Q_hat per method
     zscore_matrix.png       pairwise |z|-score between methods
@@ -51,9 +33,6 @@ METHOD_COLORS = {
     "FWD_GOLD":    "black",
 }
 
-
-# ── CLI ─────────────────────────────────────────────────────────────────────
-
 def parse_args():
     p = argparse.ArgumentParser(
         description="Build comparison plots across the three MC methods.")
@@ -61,20 +40,19 @@ def parse_args():
                    help="Parent directory containing forward_mc/, "
                         "uniform_s_is/, backward_informed_is/ subdirs.")
     p.add_argument("--gold_dir", type=Path, default=None,
-                   help="Optional directory containing a combined gold FWD "
-                        "estimate (written by combine_forward_mc.py).")
+                   help="Directory containing a combined gold FWD "
+                        "estimate (optional).")
     p.add_argument("--out_subdir", type=str, default="comparison",
                    help="Subdirectory of --run_dir for plot output.")
     p.add_argument("--bootstrap_n", type=int, default=1000,
                    help="Number of bootstrap resamples per method.")
     p.add_argument("--thin", type=int, default=100,
                    help="Thinning factor for the running-Q_hat plot "
-                        "(plot one in every `thin` samples).")
+                        "(plot one in every thin samples).")
     return p.parse_args()
 
 
 # ── I/O helpers ─────────────────────────────────────────────────────────────
-
 def _auto_cast(v):
     if v is None or v == "":
         return None
@@ -104,8 +82,6 @@ def _maybe_load(path):
 
 
 def load_method(run_dir, name):
-    """Load everything we need for one method.  Missing files are OK —
-    downstream plots that need them will skip themselves cleanly."""
     d = run_dir / METHOD_DIRS[name]
     if not d.exists():
         return None
@@ -147,7 +123,6 @@ def per_sample_Y(data):
 
 
 # ── Plots ───────────────────────────────────────────────────────────────────
-
 def plot_qhat_bars(methods, out_path, gold=None):
     names, qs, ses = [], [], []
     for m in methods:
@@ -201,7 +176,6 @@ def plot_running_qhat(methods, out_path, thin=100, gold=None):
         csum = np.cumsum(Y)
         csq = np.cumsum(Y * Y)
         mean = csum / k
-        # unbiased sample variance of the first k Ys
         var = np.where(k > 1, (csq / k - mean ** 2) * k / np.maximum(k - 1, 1), 0.0)
         se = np.sqrt(np.maximum(var / k, 0.0))
         step = max(thin, 1)
@@ -414,9 +388,6 @@ def plot_bootstrap(methods, out_path, n_bootstrap=1000, gold=None):
 
 
 def plot_loss_time_hist(methods, out_path):
-    """Distribution of t_final for wall-hit samples, per method.  This is
-    an empirical loss-time distribution — the `t_final` reported by the
-    tracer for stop_code==1 samples is exactly the wall-hit time."""
     fig, ax = plt.subplots(figsize=(8, 5))
 
     all_tloss = []
@@ -494,15 +465,12 @@ def plot_zscore_matrix(methods, out_path, gold=None):
                 ax.text(j, i, f"{Z[i, j]:.2f}", ha="center", va="center",
                         color="white" if Z[i, j] > 2 else "black")
     fig.colorbar(im, ax=ax, label="|z|")
-    ax.set_title("Pairwise |z|-score between methods\n"
-                 "(|z| > 3 = genuine disagreement)")
+    ax.set_title("Pairwise |z|-score between methods")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"  wrote {out_path.name}")
 
-
-# ── Driver ──────────────────────────────────────────────────────────────────
 
 def main():
     args = parse_args()

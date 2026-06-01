@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Uniform-s importance sampling on the valid fusion birth pool, with
-perturbed coils.  Non-backward-informed control for backward_informed_is.
+perturbed coils. No backward pilot here.
 
 Target
 ------
     Q = (1 / N_pool) * sum_{i=1..N_pool} A(x_i)
 
-where ``{x_i}`` is the same valid fusion birth pool the other two methods
-use.  NO reactivity weighting is applied.
+where {x_i} is the same valid fusion birth pool the other two methods use
 
 Proposal
 --------
@@ -16,11 +15,7 @@ Discrete proposal on the pool that is approximately uniform in Boozer s:
     1. Partition [0, 1] into ``s_score_nbins`` equal bins.
     2. Count fusion pool markers in each bin.  For a marker in bin b with
        occupancy n_bin(b) >= 1, set q_tilde_i = 1 / n_bin(i).
-    3. Normalise q_i = q_tilde_i / sum_j q_tilde_j.
-
-By construction q_i > 0 for every pool marker.  Every bin that contains any
-pool marker receives equal TOTAL probability mass, so sampling from q is
-uniform in s across occupied bins.
+    3. Normalize q_i = q_tilde_i / sum_j q_tilde_j.
 
 Estimator
 ---------
@@ -120,7 +115,7 @@ def main():
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
     np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
-    # Paraview-friendly exports of the field geometry
+    # Paraview exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
 
     # Pool -------------------------------------------------------------------
@@ -153,10 +148,8 @@ def main():
     )
     n_bin_at_marker = hist[bin_idx]
     if np.any(n_bin_at_marker == 0):
-        # Every pool marker sits in the bin corresponding to its own s, so
-        # the count there is >= 1 by construction.  Guard anyway.
         raise RuntimeError(
-            "Encountered a pool marker in an empty bin — this is impossible "
+            "Encountered a pool marker in an empty bin — impossible by construction "
             "unless s_pool contains NaNs that slipped past ensure_valid_pool."
         )
 
@@ -168,7 +161,7 @@ def main():
 
     # Target: uniform over pool; IS weight w = (1/N_pool) / q
     p_target = 1.0 / float(N_pool)
-    w_per_pool_marker = p_target / q  # per-pool weight; subset below
+    w_per_pool_marker = p_target / q  # per-pool weight
 
     np.save(out_dir / "q_weights.npy", q)
     np.save(out_dir / "s_edges.npy", s_edges)

@@ -1,22 +1,8 @@
 """Load the fusion birth pool, filter it against the LCFS, and resolve its
-Boozer ``s`` coordinate.
+Boozer s coordinate.
 
-The three MC-comparison workflows share a single "valid fusion birth pool":
-
-    1. Read ``fusion_ic_file`` columns (R, phi, Z, vpar).
-    2. Optionally restrict to the first ``n_particles`` rows (so methods 1/2/3
-       all see the same pool even when ``n_particles`` is small).
-    3. Drop rows outside the VMEC LCFS (same ``SurfaceClassifier`` used by
-       ``4_robustness/1_trace_perturbed.py``).
-    4. Attach Boozer ``s`` values.  If a pre-computed ``fusion_boozer_file``
-       exists alongside ``fusion_ic_file`` we use those directly (they were
-       produced by the same Boozer interpolant that we would otherwise call);
-       otherwise we invert (R, phi, Z) with a chunked, recursive fallback that
-       handles isolated conversion failures without poisoning whole chunks.
-    5. Drop any remaining rows whose Boozer ``s`` is NaN / not in [0, 1].
-
-The resulting pool is deterministic for a given ``(fusion_ic_file,
-n_particles, VMEC input, boozmn.nc)``, so all three methods operate on the
+The resulting pool is deterministic for a given (fusion_ic_file,
+n_particles, VMEC input, boozmn.nc), so all three methods operate on the
 identical pool indexing and hence on the same target measure Q.
 """
 import time
@@ -37,9 +23,7 @@ from firm3d.field.coordinates import (
 
 def load_fusion_pool(fusion_ic_file, n_particles=None,
                      fusion_boozer_file=None):
-    """Load the raw fusion IC file and (optionally) its pre-computed Boozer
-    counterpart.  Returns a dict with keys R, phi, Z, vpar and — if the
-    Boozer file is present and aligned — s_pre, theta_pre, zeta_pre."""
+    """Load the raw fusion IC file and (optionally) its pre-computed Boozer counterpart"""
     cyl = np.loadtxt(str(fusion_ic_file), comments="#")
     n_avail = len(cyl)
     if n_particles is not None and 0 < n_particles < n_avail:
@@ -73,8 +57,7 @@ def subset_pool(pool, mask):
 
 
 def filter_inside_lcfs(pool, sc_particle):
-    """Return a boolean mask of pool rows inside (signed distance >= 0) the
-    LCFS represented by ``sc_particle``."""
+    """Return a boolean mask of pool rows inside (signed distance >= 0) the LCFS"""
     rphiz = np.column_stack([pool["R"], pool["phi"], pool["Z"]])
     sd = sc_particle.evaluate_rphiz(rphiz).ravel()
     return sd >= 0
@@ -89,28 +72,13 @@ def build_boozer_interpolant(boozmn_file, radial_order=3, boozer_degree=3,
         ntheta_interp=boozer_res,
         nzeta_interp=boozer_res,
     )
-    # Keep bri alive for as long as bf lives.  InterpolatedBoozerField does
-    # not hold a strong Python reference to its source BoozerRadialInterpolant
-    # (only a C++ pointer), so without this attach the Python `bri` wrapper
-    # gets garbage-collected when this function returns and subsequent calls
-    # like bf.R() fall back to the base-class `_R_impl` stub
-    # ("_R_impl was not implemented").
+    # Keep bri alive for as long as bf lives
     bf._bri = bri
     return bf
 
 
 def _worker_convert_chunk(args):
-    """Top-level (picklable) worker for the parallel Boozer-conversion path.
-
-    Each worker builds its OWN BoozerRadialInterpolant + InterpolatedBoozerField
-    + BoozerCoordinateTransformer from scratch (the C++ field objects are not
-    picklable, so we cannot ship a pre-built one across the fork boundary).
-    Construction takes ~1 minute, paid once per worker, in parallel across
-    workers, so the wall-clock cost is amortized.
-
-    args = (boozmn_file_str, radial_order, boozer_degree, boozer_res, pts, chunk)
-    Returns (out, failed) where out has the same row order as pts.
-    """
+    """Top-level worker for the parallel Boozer-conversion path."""
     (boozmn_file_str, radial_order, boozer_degree, boozer_res,
      pts, chunk) = args
 
@@ -119,7 +87,7 @@ def _worker_convert_chunk(args):
         bri, boozer_degree,
         ns_interp=boozer_res, ntheta_interp=boozer_res, nzeta_interp=boozer_res,
     )
-    bf._bri = bri  # keep bri alive — see build_boozer_interpolant for why
+    bf._bri = bri  # keep bri alive (s.t. it is not garbage-collected)
     transformer = BoozerCoordinateTransformer(bf, grid_resolution=(50, 50, 50))
 
     n = len(pts)
@@ -154,25 +122,6 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
     """Convert (R, phi, Z) to (s, theta, zeta) with chunked recursive
     subdivision on conversion failure, so a single bad point only pays its
     own cost rather than poisoning a whole chunk.
-
-    Two execution modes:
-
-    * ``n_workers <= 1`` (sequential, default): runs in this process.  If
-      ``transformer`` (a ``BoozerCoordinateTransformer``) is provided, its
-      method is called directly so the underlying coordinate grid is built
-      once and reused; otherwise the module-level ``cylindrical_to_boozer``
-      is used.
-
-    * ``n_workers > 1`` *and* ``boozmn_file`` provided: parallel CPU path
-      via ``ProcessPoolExecutor``.  ``rphiz`` is split into ``n_workers``
-      contiguous slices, each worker rebuilds its own boozer_field +
-      transformer and processes its slice independently, results are
-      gathered in input order so the returned ``out`` lines up row-for-row
-      with the input ``rphiz``.  ``transformer`` is ignored on this path
-      (workers cannot inherit it across the fork boundary).
-
-    If ``n_workers > 1`` but ``boozmn_file`` is ``None`` we fall back to
-    sequential silently — workers cannot rebuild boozer_field without it.
     """
     n = len(rphiz)
     if n == 0:
@@ -181,9 +130,6 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
     # ── Parallel path ────────────────────────────────────────────────────
     if n_workers > 1 and boozmn_file is not None:
         n_workers = min(n_workers, n)
-        # np.array_split keeps slices in input order, so concatenating the
-        # per-worker outputs in the same order yields a result row-for-row
-        # aligned with the input rphiz.
         chunks = np.array_split(rphiz, n_workers)
         args_list = [
             (str(boozmn_file), radial_order, boozer_degree, boozer_res,
@@ -196,7 +142,7 @@ def _cyl_to_boozer_chunked(boozer_field, rphiz, chunk=1_000, progress=True,
             print(f"  Boozer convert (parallel): {n_workers} workers on "
                   f"{n} points, slice sizes "
                   f"{min(sizes)}-{max(sizes)}/worker; building "
-                  f"per-worker boozer_field (~1 min each, in parallel)...",
+                  f"per-worker boozer_field...",
                   flush=True)
 
         t0 = time.time()
@@ -280,12 +226,6 @@ def ensure_valid_pool(pool, sc_particle, boozer_field, transformer=None,
     """Apply the common filters to produce the "valid fusion birth pool":
     LCFS-inside + finite Boozer s in [0, 1].  Returns (valid_pool,
     s_pool, theta_pool, zeta_pool, diagnostics_dict).
-
-    If ``pool`` already has ``s_pre`` from a pre-computed Boozer IC file we
-    reuse it; otherwise we invert (R, phi, Z).  Pass ``transformer`` to
-    reuse a pre-built ``BoozerCoordinateTransformer`` across calls.  Pass
-    ``n_workers > 1`` together with ``boozmn_file`` to run the conversion
-    in parallel CPU processes (only relevant when there is no ``s_pre``).
     """
     n_input = len(pool["R"])
 
@@ -345,13 +285,7 @@ def convert_successes_to_boozer(rphiz, sc_particle, boozer_field,
                                 n_workers=1, boozmn_file=None,
                                 radial_order=3, boozer_degree=3,
                                 boozer_res=48):
-    """Used by the backward pilot to convert backward-success endpoints to
-    Boozer.  Does the same LCFS pre-filter + chunked recursive inversion and
-    returns the full-length arrays (with NaN where invalid) plus a validity
-    mask in [0, 1].  Pass ``transformer`` to reuse a pre-built
-    ``BoozerCoordinateTransformer`` across calls (sequential mode only).
-    Pass ``n_workers > 1`` together with ``boozmn_file`` to run the
-    conversion in parallel CPU processes."""
+    """Used by the backward pilot to convert backward-success endpoints to Boozer"""
     n = len(rphiz)
     s_all     = np.full(n, np.nan)
     theta_all = np.full(n, np.nan)

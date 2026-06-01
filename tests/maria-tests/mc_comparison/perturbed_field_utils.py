@@ -1,11 +1,11 @@
 """Build the perturbed Biot-Savart field used by the three MC-comparison
 workflows (forward MC, uniform-s IS, backward-informed IS).
 
-The perturbation model is identical to ``4_robustness/1_trace_perturbed.py``:
+The perturbation model is identical to mc_backward/4_robustness/1_trace_perturbed.py:
 
-  * Layer 1 (systematic error) — same Gaussian sample applied to every base
+  * Layer 1 — same Gaussian sample applied to every base
     curve before stellarator-symmetry expansion.
-  * Layer 2 (statistical error) — an independent sample applied to every coil
+  * Layer 2 — an independent sample applied to every coil
     after symmetry expansion.
 
 Both layers are seeded by ``perturbation_id`` via ``PCG64DXSM`` so the same
@@ -77,7 +77,7 @@ def _build_perturbed_coils(cfg, perturbation_id):
     sampler = GaussianSampler(
         base_curves[0].quadpoints, cfg.sigma, cfg.length, n_derivs=1,
     )
-    # Layer 1 — systematic error
+    # Layer 1
     base_curves_pert = [
         CurvePerturbed(c, PerturbationSample(sampler, randomgen=rg))
         for c in base_curves
@@ -85,7 +85,7 @@ def _build_perturbed_coils(cfg, perturbation_id):
     coils_sym = coils_via_symmetries(
         base_curves_pert, base_currents, cfg.nfp, stellsym=True,
     )
-    # Layer 2 — statistical error
+    # Layer 2
     coils = [
         Coil(CurvePerturbed(c.curve, PerturbationSample(sampler, randomgen=rg)),
              c.current)

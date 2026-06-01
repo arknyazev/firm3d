@@ -1,4 +1,4 @@
-"""Small matplotlib helpers shared by the three MC-comparison workflows."""
+"""matplotlib helpers shared by the three MC-comparison workflows."""
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -68,7 +68,7 @@ def plot_proposal_q(out_path, s_centers, q_values, title):
     ax.bar(s_centers, q_values, width=(s_centers[1] - s_centers[0]) * 0.95,
            alpha=0.7, color="C3")
     ax.set_xlabel("s (Boozer)")
-    ax.set_ylabel("proposal mass per marker (unnormalised shape)")
+    ax.set_ylabel("proposal mass per marker (unnormalized)")
     ax.set_title(title)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

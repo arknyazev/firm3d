@@ -5,8 +5,7 @@ Definitions (same across all three methods):
 
     Y_i                = per-sample estimator contribution
                          * forward MC           : Y_i = A_i
-                         * uniform-s IS         : Y_i = A_i * w_i
-                         * backward-informed IS : Y_i = A_i * w_i
+                         * IS                   : Y_i = A_i * w_i
     Q_hat              = mean(Y_i)
     sample_variance    = var(Y_i, ddof=1)
     estimator_variance = sample_variance / N
@@ -20,12 +19,10 @@ For IS methods we additionally report
     effective_sample_size = (sum w)^2 / sum(w^2)
 """
 import csv
-
 import numpy as np
 
 
 def estimator_metrics(Y, method_name, N, cv_targets=(0.10, 0.05, 0.02)):
-    """Compute the common metrics for a per-sample contribution array ``Y``."""
     Y = np.asarray(Y, dtype=np.float64)
     Q_hat = float(Y.mean())
     var_sample = float(Y.var(ddof=1)) if Y.size > 1 else 0.0
@@ -54,8 +51,6 @@ def estimator_metrics(Y, method_name, N, cv_targets=(0.10, 0.05, 0.02)):
 
 
 def is_weight_diagnostics(w):
-    """Return IS-weight summary + ESS.  Matches the backward_informed_mc.py
-    conventions (ddof=1, ESS = (sum w)^2 / sum(w^2))."""
     w = np.asarray(w, dtype=np.float64)
     N = int(w.size)
     ess = (float(w.sum() ** 2 / np.sum(w ** 2))
@@ -77,8 +72,6 @@ def summarize_stop_codes(stop_codes):
 
 
 def write_metrics_csv(path, rows):
-    """Write a CSV with the union of keys across ``rows`` as the header.
-    Missing keys in a row are written as empty strings."""
     keys = []
     seen = set()
     for r in rows:

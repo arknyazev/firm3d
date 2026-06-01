@@ -14,28 +14,18 @@
 # Runs the three MC-comparison workflows (forward MC, uniform-s IS,
 # backward-informed IS) in parallel on a single 4-GPU node — one process per GPU.
 #
-#   GPU 0 : forward_mc_perturbed.py
-#   GPU 1 : uniform_s_is_perturbed.py
-#   GPU 2 : backward_informed_is_perturbed.py
-#   GPU 3 : trajectory tracing with trajectory_viz.py.
-#
 # All three methods share the same perturbation_id (default 57) so the
 # perturbed field, fusion pool, and therefore the target Q are identical
-# across methods.  Outputs are written under a single timestamped root so
-# the three methods' metrics can be compared side-by-side.
+# across methods.
 #
-# Usage (interactive / after `sbatch`):
+# Usage:
 #     mkdir -p output
 #     sbatch run_three_methods_per_perturbation.sh
 #
 # Override defaults via env vars, e.g.:
 #     PERT_ID=57 N_SAMPLES=50000 N_POOL=100000 sbatch run_three_methods_per_perturbation.sh
-#
-# Optional: run for several perturbation ids in one submission with an
-# array job, e.g. `#SBATCH --array=0,57,1,2,3` and use
-# PERT_ID=$SLURM_ARRAY_TASK_ID below.
 
-conda activate firm3d-maria
+conda activate firm3d-maria     # CHANGE THIS to your environment on Perlmutter
 set -u
 
 # ── Configurable parameters (env overrides) ────────────────────────────────
@@ -49,29 +39,20 @@ SEED=${SEED:-57}
 OUT_ROOT=${OUT_ROOT:-/pscratch/sd/m/mariagar/projects/mc_proj/results/mc_comparison}
 
 # Backward-informed IS: coordinate used for the 1-D score histogram.
-# 'sd' = signed distance to VMEC LCFS (always defined, no Boozer inversion).
-# 's'  = Boozer s (original spec; requires cylindrical_to_boozer success).
-# Set SCORE_COORDINATE=s to restore the original Boozer-s behaviour.
+# 'sd' = signed distance to VMEC LCFS
+# 's'  = Boozer s
 SCORE_COORDINATE=${SCORE_COORDINATE:-s}
 
 # Backward pilot tmax = BACKWARD_TMAX_FACTOR * ln(H_fusion/H_low) * tau_s
-# Energy-stop fires first in practice, so this is just headroom.
+# giving a lot of headroom
 BACKWARD_TMAX_FACTOR=${BACKWARD_TMAX_FACTOR:-2.0}
 
 # CPU multiprocessing for the cylindrical->Boozer conversion in
-# backward_informed_mc_s.py.  Each worker rebuilds its own boozer_field
-# upfront in parallel, then handles a slice of the backward birth points.
-# Default 16: with --ntasks-per-node=4 the four estimator processes share
-# 64 CPU cores on a Perlmutter GPU node, so 16 workers per estimator is
-# the natural fit.  Set to 1 to fall back to the old sequential path.
+# backward_informed_mc_s.py
 N_BOOZER_WORKERS=${N_BOOZER_WORKERS:-32}
 
-# Trajectory polylines are handled by the separate `trajectory_viz.py`
-# script so that deterministic trajectories aren't re-traced 3x.  When
-# ENABLE_VIZ=1 (default), we launch it on GPU 3 in parallel with the three
-# estimator runs — GPU 3 is otherwise idle.
 ENABLE_VIZ=${ENABLE_VIZ:-1}
-VIZ_INDICES=${VIZ_INDICES:-}              # empty → trajectory_viz uses its baked defaults
+VIZ_INDICES=${VIZ_INDICES:-}              # if empty, trajectory_viz uses its own defaults
 VIZ_TMAX=${VIZ_TMAX:-1e-3}
 VIZ_N_SNAPSHOTS=${VIZ_N_SNAPSHOTS:-1000}
 
@@ -135,9 +116,6 @@ CUDA_VISIBLE_DEVICES=2 python backward_informed_mc_s.py \
 PID_BACK=$!
 
 # ── Optional 4th GPU: high-res trajectory visualisation ────────────────────
-# Runs in parallel with the three estimators on the otherwise-idle GPU 3.
-# Uses trajectory_viz.py's baked-in default pool indices unless VIZ_INDICES
-# is non-empty.
 PID_VIZ=""
 if [[ "${ENABLE_VIZ}" != "0" ]]; then
     VIZ_ARGS=(
@@ -155,8 +133,7 @@ if [[ "${ENABLE_VIZ}" != "0" ]]; then
     PID_VIZ=$!
 fi
 
-# Wait for all; remember exit statuses.  The viz job is informational —
-# its failure does not fail the overall job.
+# Wait for all and remember exit statuses
 EXIT_FWD=0; EXIT_UNIF=0; EXIT_BACK=0; EXIT_VIZ=0
 wait $PID_FWD  || EXIT_FWD=$?
 wait $PID_UNIF || EXIT_UNIF=$?
@@ -175,8 +152,7 @@ fi
 echo " Outputs at: ${OUT_DIR}"
 echo "============================================================"
 
-# Non-zero exit only if an *estimator* method failed.  A viz failure is
-# noted in the log but doesn't mark the job as failed.
+# Non-zero exit only if an estimator (not viz) method failed
 if (( EXIT_FWD != 0 || EXIT_UNIF != 0 || EXIT_BACK != 0 )); then
     exit 1
 fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combine per-shard ``forward_mc_perturbed.py`` runs into a single
+"""Combine per-shard forward_mc_perturbed.py runs into a single
 "gold standard" FWD estimate.
 
 Expects a directory layout like::
@@ -13,21 +13,15 @@ Expects a directory layout like::
 where each ``shard_k`` was produced with the same ``--perturbation_id`` and
 ``--n_pool`` but a different ``--seed`` (so the sampled pool indices are IID
 across shards).  Because the FWD estimator is an IID Bernoulli average, the
-combined estimator is just
-
+combined estimator is
     Y_all = concat([ Y_k  for k in shards ])
     Q_hat = mean(Y_all)
     SE    = sqrt( var(Y_all, ddof=1) / N_total )
-
-No per-shard weighting needed.
 
 Writes into ``<run_dir>/<out_name>/`` (default ``combined``):
     Y_all.npy             (N_total,) per-sample contributions
     metrics_combined.csv  row with combined Q_hat, SE, CVs, N_target, ...
     shard_qhats.csv       per-shard Q_hat, SE, N, n_hits
-
-Also prints per-shard z-scores as a consistency check — non-coherent shards
-(|z| > 3) are a sign of a seed collision or a bugged shard.
 """
 import argparse
 import csv
@@ -66,8 +60,6 @@ def load_shard(shard_dir):
 
 
 def per_sample_metrics(Y, cv_targets):
-    """Return a dict matching the estimator_utils layout used by the
-    per-method scripts, so the combined CSV is directly comparable."""
     Y = np.asarray(Y, dtype=np.float64)
     N = int(Y.size)
     Q = float(Y.mean()) if N else float("nan")
@@ -132,8 +124,8 @@ def main():
     combined = per_sample_metrics(Y_all, args.cv_targets)
     combined["N_shards"] = len(Ys)
 
-    # Pairwise shard z-scores, for a consistency check.
-    print("\nPer-shard |z| vs combined Q_hat (>2 is unusual, >3 is suspicious):")
+    # Pairwise shard z-scores, for a consistency check
+    print("\nPer-shard |z| vs combined Q_hat:")
     for row in per_shard:
         denom = row["standard_error"]
         if denom > 0:

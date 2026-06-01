@@ -11,12 +11,7 @@
 #SBATCH --output=output/slurm_gold_%j.log
 #
 # High-precision "gold-standard" FWD estimate of Q, built by sharding
-# ``forward_mc_perturbed.py`` across the 4 GPUs of a single node.
-#
-# Because the FWD estimator is an IID Bernoulli average, four seeds running
-# N/4 samples each is statistically equivalent to one run of N samples.
-# ``combine_forward_mc.py`` concatenates the per-shard forward_results.npy
-# arrays and recomputes Q_hat / SE / CV from the combined sequence.
+# forward_mc_perturbed.py across the 4 GPUs of a single node.
 #
 # Usage:
 #     mkdir -p output
@@ -28,17 +23,17 @@
 #         combined/              combined Y_all.npy, metrics_combined.csv
 #         logs/                  per-shard + combine logs
 
-conda activate firm3d-maria
+conda activate firm3d-maria     # CHANGE THIS to your environment on Perlmutter
 set -u
 
 # ── Configurable parameters (env overrides) ────────────────────────────────
 PERT_ID=${PERT_ID:-0}
-N_TOTAL=${N_TOTAL:-100000000}     # 100M default; 30M is "match IS SE"
+N_TOTAL=${N_TOTAL:-100000000}
 N_POOL=${N_POOL:-1000000}
 SEED_BASE=${SEED_BASE:-57}        # shard k uses SEED_BASE + k
 OUT_ROOT=${OUT_ROOT:-/pscratch/sd/m/mariagar/projects/mc_proj/results/mc_comparison}
 
-# Forward-tracer physics (must match main comparison runs for a fair gold)
+# Forward-tracer physics
 TMAX_FORWARD=${TMAX_FORWARD:-1e-2}
 TOL=${TOL:-1e-9}
 NE0=${NE0:-1e21}
@@ -123,7 +118,7 @@ if (( COMBINE_EXIT != 0 )); then
     exit 1
 fi
 
-# Echo the combined metrics for visibility in the SLURM log
+# Echo the combined metrics for visibility in the log
 if [[ -f "${OUT_DIR}/combined/metrics_combined.csv" ]]; then
     echo "Combined metrics:"
     column -s, -t < "${OUT_DIR}/combined/metrics_combined.csv"

@@ -1,24 +1,7 @@
 #!/usr/bin/env python3
 """Forward Monte Carlo on the valid fusion birth pool, with perturbed coils.
 
-Target
-------
-    Q = (1 / N_pool) * sum_{i=1..N_pool} A(x_i)
-
-where ``{x_i}`` is the empirical valid fusion birth pool from
-``fusion_ic_file`` after the LCFS and Boozer-validity filters (same filters
-that methods 2 and 3 apply, so all three methods share an identical pool and
-target).  ``A`` is the forward-tracing wall-hit indicator under the requested
-perturbed-coil field.
-
-Estimator
----------
-    Q_hat_FWD = (1/N) * sum_k A(X_k),  X_k ~ Uniform over the valid pool
-    Y_k       = A(X_k)  (per-sample contribution; no reactivity weighting)
-
-The fusion IC file is already distributed according to the physical birth
-law, so sampling it uniformly IS the target measure — no weighting is
-needed.
+Q_hat_FWD = (1/N) * sum_k A(X_k),  X_k ~ Uniform over the valid pool
 """
 import argparse
 import time
@@ -76,7 +59,7 @@ def parse_args():
                    default=Path("/pscratch/sd/m/mariagar/projects/mc_proj/IC/"
                                 "initial_conditions_boozer.txt"),
                    help="Pre-computed Boozer (s,theta,zeta) aligned with "
-                        "fusion_ic_file; used when present.")
+                        "fusion_ic_file.")
     p.add_argument("--out_dir", type=Path, default=None)
     p.add_argument("--tmax_forward", type=float, default=1e-2)
     p.add_argument("--tol", type=float, default=1e-9)
@@ -110,7 +93,7 @@ def main():
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
     np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
-    # Paraview-friendly exports of the field geometry
+    # Paraview exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
 
     # Pool -------------------------------------------------------------------
@@ -174,7 +157,7 @@ def main():
 
     # Estimator -------------------------------------------------------------
     A = (stop_codes == 1).astype(np.float64)
-    Y = A  # forward MC: Y = A
+    Y = A  # forward MC
 
     metrics = estimator_metrics(Y, "FWD", N=N)
     metrics.update({
