@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 
 """
-Verify that when nu_s = 0 and Q0=0 and energy stopping is disabled (use_energy_stop = False), the new drag
-tracers reproduce the existing vacuum Cartesian tracers.
+Verify that when nu_s = 0 and Q0=0 and energy stopping is disabled (use_energy_stop = False), 
+the new drag tracers reproduce the existing vacuum Cartesian tracers.
 (both forward and backward)
-
 """
 
 import csv
@@ -57,17 +56,15 @@ coulomb_log = 17.0
 Te_in_eV = True
 
 use_energy_stop = False
-H_stop = 3.5e6 * ONE_EV # arbitrary here, unused because energy stop is off (we do time stopping)
+H_stop = 3.5e6 * ONE_EV # arbitrary here, unused (we do time stopping)
 
 # Tolerances for comparisons
 atol_time = 1e-14
 rtol_time = 1e-11
 
-# lowered these
 atol_xyz = 1e-6
 rtol_xyz = 1e-5
 
-# lowered these
 atol_vpar = 1e-4
 rtol_vpar = 1e-5
 

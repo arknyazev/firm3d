@@ -7,8 +7,6 @@ This script does two things:
 
 1) Forward/backward consistency check for H evolution:
    dH/dt = -nu_s H
-
-   With the current implementation:
    - forward tracing should decrease H (drag decreases speed)
    - backward tracing should increase H
 
@@ -59,7 +57,7 @@ energy0_ev = 0.5e6                # 0.5 MeV
 energy0 = energy0_ev * ONE_EV     # joules
 
 # Backward stopping threshold
-H_stop_ev = 1.0e6                 # lowered this to reach it
+H_stop_ev = 1.0e6
 H_stop = H_stop_ev * ONE_EV       # joules
 
 # for nu
@@ -306,7 +304,7 @@ proc0_print(f"Saved {nparticles} initial particle positions to {out_dir}")
 # =============================================================================
 
 proc0_print("")
-proc0_print("Part 1: checking H evolution law without energy stopping")
+proc0_print("Part 1: checking H evolution without energy stopping")
 proc0_print("--------------------------------------------------------")
 
 fwd = run_cartesian_drag(
@@ -490,7 +488,7 @@ if n_hit_energy > 0:
     proc0_print(f"All energy-stopped particles satisfy H_final ~= H_stop: {hit_exact}")
     assert hit_exact, "Some particles reported energy-stop but final H is not at H_stop."
 
-# particles that did not hit stop should have reached tmax or wall
+# other stop reasons
 non_energy = ~hit_energy
 if np.any(non_energy):
     proc0_print(
