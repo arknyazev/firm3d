@@ -4,14 +4,14 @@ with perturbed coils.
 
 Stage A — backward pilot
 ------------------------
-Same workflow as ``mc_backward/backward_tracing_only.py`` but on the
-requested perturbed-coil field:
+Same workflow as ``mc_backward/backward_tracing_only.py`` but on the 
+perturbed-coil field:
   1. Load wall IC (R, phi, Z).
   2. Sample H_wall ~ U(H_low, H_fusion); sample |lambda| ~ U(0,1) with sign
      flipped so (v_par b_hat) * n_out <= 0 at t=0.
   3. Backward GPU trace with deterministic drag; use_energy_stop=True.
   4. Keep endpoints with stop_code == 2 (reached H_fusion).
-  5. Convert (R, phi, Z) -> Boozer; keep 0 <= s <= 1.
+  5. Convert (R, phi, Z) -> Boozer; keep particles with 0 <= s <= 1.
 
 Stage B — build score + proposal on fusion pool
 -----------------------------------------------
@@ -19,13 +19,9 @@ Stage B — build score + proposal on fusion pool
      (uniform bins on [0,1]).  Counts = s_hist.
   7. For each fusion pool marker in bin b_i, score_i = s_hist[b_i].
   8. q_tilde_i = (1 - alpha_mix) * score_i + alpha_mix.   (alpha_mix > 0
-     guarantees strictly positive proposal mass on every pool marker —
+     guarantees strictly positive mass on every pool marker,
      independent of what the backward pilot did or didn't find.)
   9. q_i = q_tilde_i / sum_j q_tilde_j.
-
-IMPORTANT: the target is the empirical uniform on the valid fusion pool —
-the backward cloud is only pilot information used to shape the proposal.
-NO reactivity weighting is applied on top of fusion_ic_file.
 
 Estimator
 ---------
@@ -116,13 +112,6 @@ def parse_args():
     p.add_argument("--Te0_ev", type=float, default=100.0)
     p.add_argument("--coulomb_log", type=float, default=17.0)
     p.add_argument("--normal_fd_eps", type=float, default=1e-4)
-    # ── Score-coordinate toggle ────────────────────────────────────────────
-    # Default is 'sd' (signed distance to LCFS) because 's' (Boozer s) is
-    # numerically unavailable for backward endpoints produced by
-    # deterministic-drag tracing on short tau_s time scales — the Boozer
-    # Newton inverter degenerates at s ≈ 1.  Pass --score_coordinate s to
-    # restore the original Boozer-s scoring (useful if you later change
-    # Te/ne to get endpoints away from the wall).
     p.add_argument("--score_coordinate", type=str, default="sd",
                    choices=["s", "sd"],
                    help="Coordinate for the 1-D score histogram. "
