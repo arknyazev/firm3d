@@ -383,7 +383,6 @@ def main():
                                       dtype=np.float64)
 
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
-    np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
     # Paraview exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
@@ -416,10 +415,7 @@ def main():
     np.save(out_dir / "pool_R.npy",     pool["R"])
     np.save(out_dir / "pool_phi.npy",   pool["phi"])
     np.save(out_dir / "pool_Z.npy",     pool["Z"])
-    np.save(out_dir / "pool_vpar.npy",  pool["vpar"])
     np.save(out_dir / "pool_s.npy",     s_pool)
-    np.save(out_dir / "pool_theta.npy", theta_pool)
-    np.save(out_dir / "pool_zeta.npy",  zeta_pool)
 
     # Stage B — backward-histogram score on pool ---------------------------
     print(f"\n--- Stage B: score + proposal on pool "
@@ -462,8 +458,6 @@ def main():
     p_target = 1.0 / float(N_pool)
     w_per_pool_marker = p_target / q
 
-    np.save(out_dir / "score_edges.npy",        label_edges)
-    np.save(out_dir / "backward_score_hist.npy", label_hist)
     np.save(out_dir / "score_on_pool.npy",      score)
     np.save(out_dir / "q_weights.npy",          q)
     with open(out_dir / "score_coordinate.txt", "w") as f:

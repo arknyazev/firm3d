@@ -113,7 +113,6 @@ def main():
                                       dtype=np.float64)
 
     field = build_perturbed_field(cfg, args.perturbation_id, ne_fun, Te_fun)
-    np.save(out_dir / "bn_stats.npy", field["bn_stats"])
 
     # Paraview exports of the field geometry
     write_coils_and_surface_vtk(out_dir, field["curves"], field["s_input"])
@@ -133,10 +132,7 @@ def main():
     np.save(out_dir / "pool_R.npy",     pool["R"])
     np.save(out_dir / "pool_phi.npy",   pool["phi"])
     np.save(out_dir / "pool_Z.npy",     pool["Z"])
-    np.save(out_dir / "pool_vpar.npy",  pool["vpar"])
     np.save(out_dir / "pool_s.npy",     s_pool)
-    np.save(out_dir / "pool_theta.npy", theta_pool)
-    np.save(out_dir / "pool_zeta.npy",  zeta_pool)
 
     # Proposal q (uniform in Boozer s, discrete on pool) --------------------
     print("\n--- Building uniform-s proposal q ---")

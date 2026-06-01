@@ -61,15 +61,3 @@ def plot_weight_hist(out_path, w, title, ess=None):
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-
-
-def plot_proposal_q(out_path, s_centers, q_values, title):
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.bar(s_centers, q_values, width=(s_centers[1] - s_centers[0]) * 0.95,
-           alpha=0.7, color="C3")
-    ax.set_xlabel("s (Boozer)")
-    ax.set_ylabel("proposal mass per marker (unnormalized)")
-    ax.set_title(title)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
