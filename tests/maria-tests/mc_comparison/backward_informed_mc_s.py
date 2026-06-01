@@ -5,7 +5,7 @@ with perturbed coils.
 Stage A — backward pilot
 ------------------------
 Same workflow as ``mc_backward/backward_tracing_only.py`` but on the
-requested perturbed-coil field:
+perturbed-coil field:
   1. Load wall IC (R, phi, Z).
   2. Sample H_wall ~ U(H_low, H_fusion); sample |lambda| ~ U(0,1) with sign
      flipped so (v_par b_hat) * n_out <= 0 at t=0.
