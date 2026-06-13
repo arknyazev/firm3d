@@ -47,7 +47,7 @@ echo "Backward-informed tau_s sweep: ${OUT_DIR}"
 PIDS=()
 LABELS=()
 
-for GPU in 0 1 2 3; do
+for GPU in 0 1; do
     FACTOR=${FACTORS[$GPU]}
     NE0=${NE0S[$GPU]}
     LABEL="tau_x${FACTOR}"
