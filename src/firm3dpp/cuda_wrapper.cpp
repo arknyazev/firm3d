@@ -17,7 +17,7 @@ using std::vector;
 namespace py = pybind11;
 
 
-
+// aren't these stale??
 extern "C" vector<bool> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> srange,
         py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
         double tmax, double tol, double psi0,  int nparticles);

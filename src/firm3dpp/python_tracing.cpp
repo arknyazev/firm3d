@@ -19,6 +19,54 @@ extern "C" vector<double> boozer_gpu_tracing(py::array_t<double> quad_pts, py::a
     py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
     double tmax, double tol, double psi0, int nparticles, bool vacuum=false);
 
+
+// NEW BY MARIA
+extern "C" vector<double> cartesian_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+    py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+    double tmax, double tol, int nparticles);
+
+extern "C" vector<double> cartesian_gpu_tracing_drag(
+    py::array_t<double> quad_pts,
+    py::array_t<double> srange,
+    py::array_t<double> trange,
+    py::array_t<double> zrange,
+    py::array_t<double> stz_init,
+    double m,
+    double q,
+    double vtotal,
+    py::array_t<double> vtang,
+    py::array_t<double> H_init,
+    double coulomb_log,
+    bool Te_in_eV,
+    double tmax,
+    double tol,
+    int nparticles,
+    double H_stop,
+    bool use_energy_stop
+    );
+    
+    extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
+    py::array_t<double> quad_pts,
+    py::array_t<double> srange,
+    py::array_t<double> trange,
+    py::array_t<double> zrange,
+    py::array_t<double> stz_init,
+    double m,
+    double q,
+    double vtotal,
+    py::array_t<double> vtang,
+    py::array_t<double> H_init,
+    double coulomb_log,
+    bool Te_in_eV,
+    double tmax,
+    double tol,
+    int nparticles,
+    double H_stop,
+    bool use_energy_stop
+    );
+//
+
+
 extern "C" vector<double> boozer_saw_gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> srange, py::array_t<double> trange, py::array_t<double> zrange, 
         double saw_omega, py::array_t<double> saw_srange, py::array_t<int> saw_m, py::array_t<int> saw_n, py::array_t<double> saw_phihats, int saw_nharmonics,
         py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, double tmax, double tol, double psi0, int nparticles);
@@ -162,6 +210,63 @@ void init_tracing(py::module_ &m){
         py::arg("vacuum") = false
         );
 
+    // NEW BY MARIA
+    m.def("cartesian_gpu_tracing_backward", &cartesian_gpu_tracing_backward,
+        py::arg("quad_pts"),
+        py::arg("srange"),
+        py::arg("trange"),
+        py::arg("zrange"),
+        py::arg("stz_init"),
+        py::arg("m"),
+        py::arg("q"),
+        py::arg("vtotal"),
+        py::arg("vtang"),
+        py::arg("tmax"),
+        py::arg("tol"),
+        py::arg("nparticles")
+        );
+
+    // NEW BY MARIA
+    m.def("cartesian_gpu_tracing_drag", &cartesian_gpu_tracing_drag,
+        py::arg("quad_pts"),
+        py::arg("srange"),
+        py::arg("trange"),
+        py::arg("zrange"),
+        py::arg("stz_init"),
+        py::arg("m"),
+        py::arg("q"),
+        py::arg("vtotal"),
+        py::arg("vtang"),
+        py::arg("H_init"),
+        py::arg("coulomb_log"),
+        py::arg("Te_in_eV"),
+        py::arg("tmax"),
+        py::arg("tol"),
+        py::arg("nparticles"),
+        py::arg("H_stop") = 0.0,
+        py::arg("use_energy_stop") = false
+    );
+
+    m.def("cartesian_gpu_tracing_backward_drag", &cartesian_gpu_tracing_backward_drag,
+        py::arg("quad_pts"),
+        py::arg("srange"),
+        py::arg("trange"),
+        py::arg("zrange"),
+        py::arg("stz_init"),
+        py::arg("m"),
+        py::arg("q"),
+        py::arg("vtotal"),
+        py::arg("vtang"),
+        py::arg("H_init"),
+        py::arg("coulomb_log"),
+        py::arg("Te_in_eV"),
+        py::arg("tmax"),
+        py::arg("tol"),
+        py::arg("nparticles"),
+        py::arg("H_stop") = 0.0,
+        py::arg("use_energy_stop") = false
+    );
+    //
 
     m.def("boozer_saw_gpu_tracing", &boozer_saw_gpu_tracing,
         py::arg("quad_pts"),

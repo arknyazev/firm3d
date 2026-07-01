@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Logs
+1_IC_sample_1e6_points/outputs/log.txt
+1_IC_sample_1e6_points/outputs/stdout_*.txt
+2_tracing_gpu/output/*.log
+
+# OS
+.DS_Store

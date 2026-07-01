@@ -3,6 +3,7 @@
 #include <iostream>
 #include "tracing.h"
 #include <math.h>
+#include <float.h>
 #include "xtensor-python/pyarray.hpp"     // Numpy bindings
 typedef xt::pyarray<double> PyArray;
 #include "xtensor-python/pytensor.hpp"     // Numpy bindings
@@ -29,7 +30,8 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 // enum used for templating
 // https://stackoverflow.com/questions/9116267/how-can-i-use-an-enumeration-as-a-template-parameter
-enum class RHS {GC_CartesianVacuum, GC_BoozerVacuum, GC_Boozer, GC_BoozerVacuumSAW, GC_BoozerNoKSAW};
+// NEW BY MARIA: added last 2
+enum class RHS {GC_CartesianVacuum, GC_BoozerVacuum, GC_Boozer, GC_BoozerVacuumSAW, GC_BoozerNoKSAW, GC_CartesianDragForward, GC_CartesianDragBackward};
 
 enum class CoordSys {Cartesian, Boozer};
 
@@ -37,7 +39,8 @@ template<RHS id>
 __host__ __device__ constexpr CoordSys map_rhs_to_coord(){
     if constexpr(id == RHS::GC_BoozerVacuum || id == RHS::GC_Boozer || id == RHS::GC_BoozerVacuumSAW || id == RHS::GC_BoozerNoKSAW){
         return CoordSys::Boozer;
-    } else if constexpr (id == RHS::GC_CartesianVacuum) {
+    // NEW BY MARIA: added last 2
+    } else if constexpr (id == RHS::GC_CartesianVacuum || id == RHS::GC_CartesianDragForward || id == RHS::GC_CartesianDragBackward) {
         return CoordSys::Cartesian;
     }
 }
@@ -73,11 +76,78 @@ __constant__ int n_x2_d, n_x3_d, n_x23_d; // stores the number of interpolant ce
 __constant__ int nparticles_d; // number of particles being traced
 __constant__ double v_total_d; // initial velocity
 
+// NEW BY MARIA: drag parameters
+__constant__ double H_stop_d;        // optional energy stopping threshold
+__constant__ bool use_energy_stop_d; // whether to enable H-based stopping
+
 __constant__ double psi0_d; // used for Boozer RHS only
 __constant__ double saw_srange_d[4]; // used for SAW RHS only
 
 __constant__ bool rescale_abstol_var_d = true;
 __constant__ bool is_test_d = false;
+
+// NEW BY MARIA
+// +1 forward tracing (default), -1 backward (set only by new backward entrypoints)
+__constant__ int dir_d = 1;
+
+// NEW BY MARIA for nu_s interpolation
+__constant__ double coulomb_log_d;
+__constant__ double Te_unit_d;  // this is 1 if our interpolated Te is already in joules
+
+
+// NEW BY MARIA: current speed from energy for drag, v = sqrt(2H/m)
+__device__ inline double current_speed_from_H(double H){
+    return sqrt(fmax(2.0 * H / mass_d, 0.0));
+}
+
+// NEW BY MARIA: heuristic for time step, taking into account changing speed with drag
+template <RHS id>
+__device__ void calc_max_timestep_size_cartesian_drag(double* dtmax, double* loc){
+    double x = loc[1 * PARTICLES_PER_BLOCK + threadIdx.x];
+    double y = loc[2 * PARTICLES_PER_BLOCK + threadIdx.x];
+    double H = loc[5 * PARTICLES_PER_BLOCK + threadIdx.x];
+
+    double r = sqrt(x * x + y * y);
+    double v_curr = current_speed_from_H(H);
+
+    // same quarter-turn heuristic as vacuum, but with current speed
+    dtmax[threadIdx.x] = r * 0.5 * M_PI / fmax(v_curr, 1e-30);
+}
+
+
+// NEW BY MARIA: tau computation (then convert to nu by inverting)
+__device__ inline double slowing_down_time_si(double ne, double Te_raw){
+        // Inputs:
+    //   ne     [m^-3]
+    //   Te_raw [J] if Te_unit_d = 1
+    //          [eV] if Te_unit_d = e
+    //
+    // Output:
+    //   tau_s [s]
+    const double eps0 = 8.8541878128e-12;   // F/m
+    const double e_ch = 1.602176634e-19;    // C
+    const double m_e  = 9.1093837015e-31;   // kg
+    const double Zalpha = 2.0;
+    
+    double Te_J = Te_raw * Te_unit_d;
+    
+    ne   = fmax(ne, 1e-300);
+    Te_J = fmax(Te_J, 1e-300);
+    double lnL = fmax(coulomb_log_d, 1e-6);
+    
+    double numerator =
+        3.0 * pow(2.0 * M_PI, 1.5) * eps0 * eps0 * mass_d * pow(Te_J, 1.5);
+    
+    double denominator =
+        Zalpha * Zalpha * pow(e_ch, 4.0) * sqrt(m_e) * ne * lnL;
+    
+    return numerator / denominator;
+}
+
+__device__ inline double slowdown_frequency_from_ne_Te(double ne, double Te_raw){
+    double tau_s = slowing_down_time_si(ne, Te_raw);
+    return 1.0 / fmax(tau_s, 1e-300);
+}
 
 /* shape computes shape functions for cubic interpolation on a a regular grid
  * we assume the point x has been rescaled to be on the grid 0, 1, 2, 3
@@ -158,6 +228,19 @@ __device__ void calc_derivs(double* derivs, int deriv_id, double* quadpts_arr, d
 };
 
 
+// NEW BY MARIA: keeping track of drag directions
+template <RHS id>
+__host__ __device__ constexpr double drag_step_dir() {
+    if constexpr (id == RHS::GC_CartesianDragForward) {
+        return 1.0;
+    } else if constexpr (id == RHS::GC_CartesianDragBackward) {
+        return -1.0;
+    } else {
+        return 1.0;
+    }
+}
+
+
 // calc_derivs implementation for guiding center cartesian vacuum tracing
 template <> 
 __device__ void calc_derivs<RHS::GC_CartesianVacuum>(double* derivs, int deriv_id, double* quadpts_arr, double* x_temp, bool* symmetry_exploited, 
@@ -212,6 +295,102 @@ __device__ void calc_derivs<RHS::GC_CartesianVacuum>(double* derivs, int deriv_i
     }
 }
 
+
+// NEW BY MARIA: derivatives for forward / backward tracing with drag
+template <RHS id>
+__device__ void calc_derivs_cartesian_drag(
+    double* derivs,
+    int deriv_id,
+    double* quadpts_arr,
+    double* x_temp,
+    bool* symmetry_exploited,
+    int* index_i,
+    int* index_j,
+    int* index_k,
+    double* x1_shape,
+    double* x2_shape,
+    double* x3_shape,
+    int nparticles_blk
+){
+    __shared__ double block_interpolants[9 * PARTICLES_PER_BLOCK];
+
+    __syncthreads();
+    interpolate<9>(
+        block_interpolants,
+        quadpts_arr,
+        index_i,
+        index_j,
+        index_k,
+        x1_shape,
+        x2_shape,
+        x3_shape,
+        nparticles_blk
+    );
+    __syncthreads();
+
+    if(threadIdx.x < nparticles_blk){
+        double x     = x_temp[1 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double y     = x_temp[2 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double z     = x_temp[3 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double v_par = x_temp[4 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double H     = x_temp[5 * PARTICLES_PER_BLOCK + threadIdx.x];
+
+        double B_r = block_interpolants[0 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double B_phi = block_interpolants[1 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double B_z = block_interpolants[2 * PARTICLES_PER_BLOCK + threadIdx.x];
+
+        double GradAbsB_r = block_interpolants[3 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double GradAbsB_phi = block_interpolants[4 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double GradAbsB_z = block_interpolants[5 * PARTICLES_PER_BLOCK + threadIdx.x];
+
+        double boundary_dist = block_interpolants[6 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double ne_local      = block_interpolants[7 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double Te_local      = block_interpolants[8 * PARTICLES_PER_BLOCK + threadIdx.x];
+
+        if(symmetry_exploited[threadIdx.x]){
+            B_r *= -1.0;
+            GradAbsB_phi *= -1.0;
+            GradAbsB_z *= -1.0;
+        }
+
+        double phi = atan2(y, x);
+
+        double B_x = cos(phi) * B_r - sin(phi) * B_phi;
+        double B_y = sin(phi) * B_r + cos(phi) * B_phi;
+
+        double GradAbsB_x = cos(phi) * GradAbsB_r - sin(phi) * GradAbsB_phi;
+        double GradAbsB_y = sin(phi) * GradAbsB_r + cos(phi) * GradAbsB_phi;
+
+        double AbsB = sqrt(B_x*B_x + B_y*B_y + B_z*B_z);
+
+        double Kpar  = 0.5 * mass_d * v_par * v_par;
+        double Kperp = H - Kpar;
+        Kperp = fmax(Kperp, 0.0);
+
+        double mu_eff = Kperp / (mass_d * fmax(AbsB, 1e-30));
+
+        double fak1 = v_par / fmax(AbsB, 1e-30);
+        double fak2 = (H + Kpar) / (charge_d * pow(fmax(AbsB, 1e-30), 3.0));
+
+        double BcrossGradAbsB_x = B_y * GradAbsB_z - B_z * GradAbsB_y;
+        double BcrossGradAbsB_y = B_z * GradAbsB_x - B_x * GradAbsB_z;
+        double BcrossGradAbsB_z = B_x * GradAbsB_y - B_y * GradAbsB_x;
+
+        double bhat_dot_gradB = (B_x * GradAbsB_x + B_y * GradAbsB_y + B_z * GradAbsB_z) / fmax(AbsB, 1e-30);
+
+        double nu_s_local = slowdown_frequency_from_ne_Te(ne_local, Te_local);
+        double dvpar_drag = -0.5 * nu_s_local * v_par;
+        double dHdt       = -nu_s_local * H;
+
+        derivs[(7 * deriv_id + 0) * PARTICLES_PER_BLOCK + threadIdx.x] = fak1 * B_x + fak2 * BcrossGradAbsB_x;
+        derivs[(7 * deriv_id + 1) * PARTICLES_PER_BLOCK + threadIdx.x] = fak1 * B_y + fak2 * BcrossGradAbsB_y;
+        derivs[(7 * deriv_id + 2) * PARTICLES_PER_BLOCK + threadIdx.x] = fak1 * B_z + fak2 * BcrossGradAbsB_z;
+        derivs[(7 * deriv_id + 3) * PARTICLES_PER_BLOCK + threadIdx.x] = -mu_eff * bhat_dot_gradB + dvpar_drag;
+        derivs[(7 * deriv_id + 4) * PARTICLES_PER_BLOCK + threadIdx.x] = dHdt;
+        derivs[(7 * deriv_id + 5) * PARTICLES_PER_BLOCK + threadIdx.x] = AbsB;
+        derivs[(7 * deriv_id + 6) * PARTICLES_PER_BLOCK + threadIdx.x] = boundary_dist;
+    }
+}
 
 // calc_derivs implementation for guiding center boozer vacuum tracing
 template <> 
@@ -657,14 +836,22 @@ __device__ void build_state(double* x_temp, int deriv_id, bool* symmetry_exploit
                             double* x1_shape, double* x2_shape, double* x3_shape, double* state, double* derivs, double* t, double* dt){
 
     // store time
-    x_temp[threadIdx.x] = t[threadIdx.x] + dp5_t_wgts[deriv_id]*dt[threadIdx.x];
+    //x_temp[threadIdx.x] = t[threadIdx.x] + dp5_t_wgts[deriv_id]*dt[threadIdx.x];
+    // NEW BY MARIA (instead of line above)
+    // t[] is elapsed time >= 0 for control flow; physical time reverses with dir_d
+    double dt_signed = dt[threadIdx.x];
+    double t_phys = ((double)dir_d) * t[threadIdx.x];
+    x_temp[threadIdx.x] = t_phys + dp5_t_wgts[deriv_id] * dt_signed;
+    //
     for (int i = 0; i < 4; i++) {
         x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] = state[i*PARTICLES_PER_BLOCK + threadIdx.x];
     }
 
     for (int j=0; j<deriv_id; ++j){
         for(int i=0; i<4; ++i){
-            x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] += dt[threadIdx.x] * dp5_wgts[deriv_id][j] * derivs[(6*j+i)*PARTICLES_PER_BLOCK + threadIdx.x];
+            //x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] += dt[threadIdx.x] * dp5_wgts[deriv_id][j] * derivs[(6*j+i)*PARTICLES_PER_BLOCK + threadIdx.x];
+            // NEW BY MARIA (instead of line above)
+            x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x] += dt_signed * dp5_wgts[deriv_id][j] * derivs[(6*j+i)*PARTICLES_PER_BLOCK + threadIdx.x];
         }
     }
     
@@ -711,6 +898,82 @@ __device__ void build_state(double* x_temp, int deriv_id, bool* symmetry_exploit
     index_k[threadIdx.x] = k/3;
 };
 
+
+// NEW BY MARIA: new state builder with drag
+template <RHS id>
+__device__ void build_state_cartesian_drag(
+    double* x_temp,
+    int deriv_id,
+    bool* symmetry_exploited,
+    int* index_i,
+    int* index_j,
+    int* index_k,
+    double* x1_shape,
+    double* x2_shape,
+    double* x3_shape,
+    double* state,
+    double* derivs,
+    double* t,
+    double* dt
+){
+    constexpr double step_dir = drag_step_dir<id>();
+
+    double dt_signed = dt[threadIdx.x];
+    double t_phys = step_dir * t[threadIdx.x];
+
+    x_temp[threadIdx.x] = t_phys + dp5_t_wgts[deriv_id] * dt_signed;
+
+    for(int i = 0; i < 5; ++i){
+        x_temp[(i + 1) * PARTICLES_PER_BLOCK + threadIdx.x] =
+            state[i * PARTICLES_PER_BLOCK + threadIdx.x];
+    }
+
+    for(int j = 0; j < deriv_id; ++j){
+        for(int i = 0; i < 5; ++i){
+            x_temp[(i + 1) * PARTICLES_PER_BLOCK + threadIdx.x] +=
+                dt_signed *
+                dp5_wgts[deriv_id][j] *
+                derivs[(7 * j + i) * PARTICLES_PER_BLOCK + threadIdx.x];
+        }
+    }
+
+    double interp_pt[3];
+    map_to_grid<CoordSys::Cartesian>(interp_pt, x_temp, symmetry_exploited);
+
+    double x1 = interp_pt[0];
+    double x2 = interp_pt[1];
+    double x3 = interp_pt[2];
+
+    double x1_grid_size = x1_range_d[3];
+    double x2_grid_size = x2_range_d[3];
+    double x3_grid_size = x3_range_d[3];
+
+    int i = 3 * ((int)((x1 - x1_range_d[0]) / x1_grid_size) / 3);
+    int j = 3 * ((int)((x2 - x2_range_d[0]) / x2_grid_size) / 3);
+    int k = 3 * ((int)((x3 - x3_range_d[0]) / x3_grid_size) / 3);
+
+    i = min(i, (int)x1_range_d[2] - 4);
+    j = min(j, (int)x2_range_d[2] - 4);
+    k = min(k, (int)x3_range_d[2] - 4);
+
+    i = max(i, 0);
+    j = max(j, 0);
+    k = max(k, 0);
+
+    double x1_rel = (x1 - i * x1_grid_size - x1_range_d[0]) / x1_grid_size;
+    double x2_rel = (x2 - j * x2_grid_size - x2_range_d[0]) / x2_grid_size;
+    double x3_rel = (x3 - k * x3_grid_size - x3_range_d[0]) / x3_grid_size;
+
+    for(int ii = 0; ii < 4; ++ii){
+        shape(x1_rel, x1_shape[ii * PARTICLES_PER_BLOCK + threadIdx.x], ii);
+        shape(x2_rel, x2_shape[ii * PARTICLES_PER_BLOCK + threadIdx.x], ii);
+        shape(x3_rel, x3_shape[ii * PARTICLES_PER_BLOCK + threadIdx.x], ii);
+    }
+
+    index_i[threadIdx.x] = i / 3;
+    index_j[threadIdx.x] = j / 3;
+    index_k[threadIdx.x] = k / 3;
+}
 
 // calculate maximum allowable timestep to allow at most a quarter of a revolution per step
 template<CoordSys coord>
@@ -771,7 +1034,80 @@ __device__ void setup_particle(double* mu, double* t, double* dt, double* dtmax,
         calc_max_timestep_size<coord>(dtmax, x_temp, derivs);
         dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
 
-        dt[threadIdx.x] = 1e-3*dtmax[threadIdx.x];
+        //dt[threadIdx.x] = 1e-3*dtmax[threadIdx.x];
+        // NEW BY MARIA (instead of line above) - need to take sign of time into account
+        dt[threadIdx.x] = ((double)dir_d) * (1e-3 * dtmax[threadIdx.x]);
+    }
+}
+
+
+// NEW BY MARIA: drag-specific particle setup
+template <RHS id>
+__device__ void setup_particle_cartesian_drag(
+    double* t,
+    double* dt,
+    double* dtmax,
+    double* x_temp,
+    bool* symmetry_exploited,
+    int* index_i,
+    int* index_j,
+    int* index_k,
+    double* quad_pts,
+    double* x1_shape,
+    double* x2_shape,
+    double* x3_shape,
+    double* state,
+    double* derivs,
+    int nparticles_blk
+){
+
+    constexpr double step_dir = drag_step_dir<id>();
+
+    if(threadIdx.x < nparticles_blk){
+        t[threadIdx.x] = 0.0;
+        dt[threadIdx.x] = 0.0;
+        symmetry_exploited[threadIdx.x] = false;
+
+        build_state_cartesian_drag<id>(
+            x_temp,
+            0,
+            symmetry_exploited,
+            index_i,
+            index_j,
+            index_k,
+            x1_shape,
+            x2_shape,
+            x3_shape,
+            state,
+            derivs,
+            t,
+            dt
+        );
+    }
+    __syncthreads();
+
+    calc_derivs_cartesian_drag<id>(
+        derivs,
+        0,
+        quad_pts,
+        x_temp,
+        symmetry_exploited,
+        index_i,
+        index_j,
+        index_k,
+        x1_shape,
+        x2_shape,
+        x3_shape,
+        nparticles_blk
+    );
+    __syncthreads();
+
+    if(threadIdx.x < nparticles_blk){
+        calc_max_timestep_size_cartesian_drag<id>(dtmax, x_temp);
+        dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
+
+        // Signed timestep: positive for forward drag, negative for backward drag
+        dt[threadIdx.x] = step_dir * (1e-3 * dtmax[threadIdx.x]);
     }
 }
 
@@ -786,6 +1122,12 @@ __device__ void check_has_left(bool* has_left, double* state, double* derivs){
 
 template<>
 __device__ void check_has_left<CoordSys::Cartesian>(bool* has_left, double* state, double* derivs){
+    // NEW BY MARIA
+    if(is_test_d){
+        has_left[threadIdx.x] = false;
+        return;
+    }
+    //
     has_left[threadIdx.x] = derivs[(6*6 + 5)*PARTICLES_PER_BLOCK + threadIdx.x] < 0; // boundary dist fn at new location
 }
 
@@ -805,6 +1147,10 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
     if(has_left[threadIdx.x]){
         return;
     }
+    // NEW BY MARIA
+    double dt_signed = dt[threadIdx.x];
+    double dt_mag = fabs(dt_signed);
+    //
     const double bhat1 = 71.0 / 57600.0, bhat3 = -71.0 / 16695.0, bhat4 = 71.0 / 1920.0, bhat5 = -17253.0 / 339200.0, bhat6 = 22.0 / 525.0, bhat7 = -1.0 / 40.0;
     // Compute  error
     // https://live.boost.org/doc/libs/1_82_0/libs/numeric/odeint/doc/html/boost_numeric_odeint/odeint_in_detail/steppers.html
@@ -814,19 +1160,28 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
     for(int i = 0; i < 4; i++) {
         double state_i = state[i*PARTICLES_PER_BLOCK + threadIdx.x];
         double deriv_i = derivs[(6*0 + i)*PARTICLES_PER_BLOCK + threadIdx.x];
-        err_elt = dt[threadIdx.x]*(bhat1 * deriv_i
+        //err_elt = dt[threadIdx.x]*(bhat1 * deriv_i
+        // NEW BY MARIA (instead of line above): time sign
+        err_elt = dt_mag * (bhat1 * deriv_i
+        //
                                  + bhat3 * derivs[(6*2 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat4 * derivs[(6*3 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat5 * derivs[(6*4 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat6 * derivs[(6*5 + i)*PARTICLES_PER_BLOCK + threadIdx.x] 
                                  + bhat7 * derivs[(6*6 + i)*PARTICLES_PER_BLOCK + threadIdx.x]);
         double atol_i = (rescale_abstol_var_d) && (i == 3) ?  atol_d * v_total_d : atol_d;
-        err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt[threadIdx.x]*fabs(deriv_i)));
+        //err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt[threadIdx.x]*fabs(deriv_i)));
+        // NEW BY MARIA (instead of line above) : time sign
+        err_elt = fabs(err_elt) / (atol_i + rtol_d*(fabs(state_i) + dt_mag * fabs(deriv_i)));
+        //
         max_err = fmax(max_err, err_elt);
     }
 
     // Compute new step size
-    double dt_new = dt[threadIdx.x]*0.9;
+    //double dt_new = dt[threadIdx.x]*0.9;
+    // NEW BY MARIA (instead of line above) : time sign
+    double dt_new = dt_mag * 0.9;
+    //
     double exponent = 0.0;
     if(max_err > 1.0){
         exponent = -1.0/3.0;
@@ -835,17 +1190,23 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
         exponent = -1.0/5.0;
     }
     dt_new *= pow(max_err, exponent);
-    dt_new = fmax(dt_new, 0.2 * dt[threadIdx.x]);
-    dt_new = fmin(dt_new, 5.0 * dt[threadIdx.x]);   
+    dt_new = fmax(dt_new, 0.2 * dt_mag); // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
+    dt_new = fmin(dt_new, 5.0 * dt_mag);  // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
 
     if(max_err <= 1.0) {
         // if the error is moderate, don't use a new step size
         if (0.5 < max_err){
-            dt_new = dt[threadIdx.x];
+            dt_new = dt_mag;    // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
         }
         // Accept the step
-        t[threadIdx.x] += dt[threadIdx.x];
-        dt[threadIdx.x] = fmin(dt_new, tmax_d - t[threadIdx.x]);
+        t[threadIdx.x] += dt_mag;    // NEW BY MARIA: dt_mag instead of dt[threadIdx.x]
+        //dt[threadIdx.x] = fmin(dt_new, tmax_d - t[threadIdx.x]);
+        // NEW BY MARIA (instead of line above)
+        // next signed dt: preserve direction, clamp remaining elapsed time
+        double remaining = tmax_d - t[threadIdx.x];
+        double next_mag = fmin(dt_new, remaining);
+        dt[threadIdx.x] = ((double)dir_d) * next_mag;
+        //
 
         for(int i = 0; i < 4; i++) {
             state[i*PARTICLES_PER_BLOCK + threadIdx.x] = x_temp[(i+1)*PARTICLES_PER_BLOCK + threadIdx.x];
@@ -855,7 +1216,202 @@ __device__ void adjust_time(double* t, double* dt, double* state, double* derivs
         check_has_left<coord>(has_left, state, derivs);
     } else {
         // Reject the step and try again with smaller dt
-        dt[threadIdx.x] = dt_new;
+        dt[threadIdx.x] = ((double)dir_d) * dt_new;   // NEW BY MARIA: added direction
+    }
+}
+
+
+// NEW BY MARIA: drag-specific time adjust
+template <RHS id>
+__device__ void adjust_time_cartesian_drag(
+    double* t,
+    double* dt,
+    double* state,
+    double* derivs,
+    double* x_temp,
+    bool* has_left,
+    bool* hit_energy_stop,
+    int* stop_reason,
+    double* dtmax
+){
+    constexpr double step_dir = drag_step_dir<id>();
+
+    if(has_left[threadIdx.x] || hit_energy_stop[threadIdx.x]){
+        return;
+    }
+
+    double dt_signed = dt[threadIdx.x];
+    double dt_mag = fabs(dt_signed);
+
+    const double bhat1 = 71.0 / 57600.0;
+    const double bhat3 = -71.0 / 16695.0;
+    const double bhat4 = 71.0 / 1920.0;
+    const double bhat5 = -17253.0 / 339200.0;
+    const double bhat6 = 22.0 / 525.0;
+    const double bhat7 = -1.0 / 40.0;
+
+    double max_err = 0.0;
+
+    for(int i = 0; i < 5; ++i){
+        double state_i = state[i * PARTICLES_PER_BLOCK + threadIdx.x];
+        double deriv_i = derivs[(7 * 0 + i) * PARTICLES_PER_BLOCK + threadIdx.x];
+
+        double err_elt =
+            dt_mag *
+            (bhat1 * derivs[(7 * 0 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
+            + bhat3 * derivs[(7 * 2 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
+            + bhat4 * derivs[(7 * 3 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
+            + bhat5 * derivs[(7 * 4 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
+            + bhat6 * derivs[(7 * 5 + i) * PARTICLES_PER_BLOCK + threadIdx.x]
+            + bhat7 * derivs[(7 * 6 + i) * PARTICLES_PER_BLOCK + threadIdx.x]);
+
+        double atol_i = atol_d;
+        if(rescale_abstol_var_d && i == 3){
+            atol_i *= v_total_d; // vpar
+        } else if(rescale_abstol_var_d && i == 4){
+            atol_i *= 0.5 * mass_d * v_total_d * v_total_d; // H scale
+        }
+
+        err_elt = fabs(err_elt) / (atol_i + rtol_d * (fabs(state_i) + dt_mag * fabs(deriv_i)));
+        max_err = fmax(max_err, err_elt);
+    }
+
+    double dt_new = dt_mag * 0.9;
+    double exponent = 0.0;
+
+    if(max_err > 1.0){
+        exponent = -1.0 / 3.0;
+    }
+    if(max_err < 0.5){
+        exponent = -1.0 / 5.0;
+    }
+
+    if(max_err > 0.0){
+        dt_new *= pow(max_err, exponent);
+    } else {
+        dt_new *= 5.0;
+    }
+
+    dt_new = fmax(dt_new, 0.2 * dt_mag);
+    dt_new = fmin(dt_new, 5.0 * dt_mag);
+
+    if(max_err <= 1.0){
+        if(0.5 < max_err){
+            dt_new = dt_mag;
+        }
+
+        // Save old accepted state before commit
+        double old_state_local[5];
+        for(int i = 0; i < 5; ++i){
+            old_state_local[i] = state[i * PARTICLES_PER_BLOCK + threadIdx.x];
+        }
+        double old_t_local = t[threadIdx.x];
+
+        // Proposed new accepted state from x_temp
+        double new_state_local[5];
+        for(int i = 0; i < 5; ++i){
+            new_state_local[i] = x_temp[(i + 1) * PARTICLES_PER_BLOCK + threadIdx.x];
+        }
+        double new_t_local = old_t_local + dt_mag;
+
+        // Physical admissibility
+        double vpar_new = new_state_local[3];
+        double H_new    = new_state_local[4];
+
+        double Kpar_new  = 0.5 * mass_d * vpar_new * vpar_new;
+        double Kperp_new = H_new - Kpar_new;
+
+        if(H_new < 0.0 || Kperp_new < 0.0){
+            double smaller_dt = fmax(0.2 * dt_mag, 1e-14);
+            dt[threadIdx.x] = step_dir * smaller_dt;
+            return;
+        }
+
+        // Exact backward crossing of H_stop
+        if constexpr (id == RHS::GC_CartesianDragBackward){
+            if(use_energy_stop_d){
+                double H_prev = old_state_local[4];
+                if(H_prev < H_stop_d && H_new >= H_stop_d){
+                    double denom = H_new - H_prev;
+                    double alpha = (fabs(denom) > 1e-30) ? (H_stop_d - H_prev) / denom : 1.0;
+                    alpha = fmin(fmax(alpha, 0.0), 1.0);
+
+                    for(int i = 0; i < 5; ++i){
+                        state[i * PARTICLES_PER_BLOCK + threadIdx.x] =
+                            old_state_local[i] + alpha * (new_state_local[i] - old_state_local[i]);
+                    }
+
+                    t[threadIdx.x] = old_t_local + alpha * (new_t_local - old_t_local);
+
+                    // force exact threshold value
+                    state[4 * PARTICLES_PER_BLOCK + threadIdx.x] = H_stop_d;
+
+                    hit_energy_stop[threadIdx.x] = true;
+                    stop_reason[threadIdx.x] = 2;
+                    dt[threadIdx.x] = 0.0;
+                    return;
+                }
+            }
+        }
+
+        // Commit full accepted step
+        for(int i = 0; i < 5; ++i){
+            state[i * PARTICLES_PER_BLOCK + threadIdx.x] = new_state_local[i];
+        }
+        t[threadIdx.x] = new_t_local;
+
+        // Recompute timestep cap from updated state
+        calc_max_timestep_size_cartesian_drag<id>(dtmax, x_temp);
+        dtmax[threadIdx.x] = fmin(dtmax[threadIdx.x], tmax_d);
+
+        double remaining = tmax_d - t[threadIdx.x];
+        double next_mag = fmin(dt_new, remaining);
+        next_mag = fmin(next_mag, dtmax[threadIdx.x]);
+        dt[threadIdx.x] = step_dir * next_mag;
+
+        // Wall-hit check uses stage-7 accepted endpoint geometry
+        has_left[threadIdx.x] =
+            derivs[(7 * 6 + 6) * PARTICLES_PER_BLOCK + threadIdx.x] < 0.0;
+
+        if(has_left[threadIdx.x]){
+            stop_reason[threadIdx.x] = 1;
+            return;
+        }
+
+        // Forward energy stop
+        if constexpr (id == RHS::GC_CartesianDragForward){
+            if(use_energy_stop_d){
+                double H_prev = old_state_local[4];
+                double H_new  = new_state_local[4];
+        
+                if(H_prev > H_stop_d && H_new <= H_stop_d){
+                    double denom = H_new - H_prev;
+                    double alpha = (fabs(denom) > 1e-30) ? (H_stop_d - H_prev) / denom : 1.0;
+                    alpha = fmin(fmax(alpha, 0.0), 1.0);
+        
+                    for(int i = 0; i < 5; ++i){
+                        state[i * PARTICLES_PER_BLOCK + threadIdx.x] =
+                            old_state_local[i] + alpha * (new_state_local[i] - old_state_local[i]);
+                    }
+        
+                    t[threadIdx.x] = old_t_local + alpha * (new_t_local - old_t_local);
+        
+                    // force exact threshold value
+                    state[4 * PARTICLES_PER_BLOCK + threadIdx.x] = H_stop_d;
+        
+                    hit_energy_stop[threadIdx.x] = true;
+                    stop_reason[threadIdx.x] = 2;
+                    dt[threadIdx.x] = 0.0;
+                    return;
+                }
+            }
+        }
+
+        if(t[threadIdx.x] >= tmax_d){
+            stop_reason[threadIdx.x] = 0;
+        }
+    } else {
+        dt[threadIdx.x] = step_dir * dt_new;
     }
 }
 
@@ -938,9 +1494,135 @@ __global__ void particle_trace_kernel(double* out, double* init_pos, double* qua
 }
 
 
+// NEW BY MARIA: drag kernel
+template <RHS id>
+__global__ void particle_trace_kernel_cartesian_drag(
+    double* out,
+    double* init_pos,
+    double* quadpts_arr
+){
+    int idx = threadIdx.x + blockIdx.x * PARTICLES_PER_BLOCK;
+
+    __shared__ double x_temp[6 * PARTICLES_PER_BLOCK];
+    __shared__ double derivs[49 * PARTICLES_PER_BLOCK];
+    __shared__ double dt[PARTICLES_PER_BLOCK];
+    __shared__ bool symmetry_exploited[PARTICLES_PER_BLOCK];
+    __shared__ int index_i[PARTICLES_PER_BLOCK];
+    __shared__ int index_j[PARTICLES_PER_BLOCK];
+    __shared__ int index_k[PARTICLES_PER_BLOCK];
+    __shared__ double x1_shape[4 * PARTICLES_PER_BLOCK];
+    __shared__ double x2_shape[4 * PARTICLES_PER_BLOCK];
+    __shared__ double x3_shape[4 * PARTICLES_PER_BLOCK];
+    __shared__ double t[PARTICLES_PER_BLOCK];
+    __shared__ double dtmax[PARTICLES_PER_BLOCK];
+    __shared__ double state[5 * PARTICLES_PER_BLOCK];
+    __shared__ bool has_left[PARTICLES_PER_BLOCK];
+    __shared__ bool hit_energy_stop[PARTICLES_PER_BLOCK];
+    __shared__ int stop_reason[PARTICLES_PER_BLOCK];
+
+    bool is_valid = idx < nparticles_d && threadIdx.x < PARTICLES_PER_BLOCK;
+    int nparticles_blk = __syncthreads_count(is_valid);
+
+    if(is_valid){
+        t[threadIdx.x] = 0.0;
+        has_left[threadIdx.x] = false;
+        hit_energy_stop[threadIdx.x] = false;
+        stop_reason[threadIdx.x] = 0;
+
+        for(int i = 0; i < 5; ++i){
+            state[i * PARTICLES_PER_BLOCK + threadIdx.x] = init_pos[5 * idx + i];
+        }
+    }
+    __syncthreads();
+
+    setup_particle_cartesian_drag<id>(
+        t, dt, dtmax, x_temp, symmetry_exploited,
+        index_i, index_j, index_k,
+        quadpts_arr, x1_shape, x2_shape, x3_shape,
+        state, derivs, nparticles_blk
+    );
+    __syncthreads();
+
+    if(is_valid){
+        double vpar0 = state[3 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double H0    = state[4 * PARTICLES_PER_BLOCK + threadIdx.x];
+        double Kpar0 = 0.5 * mass_d * vpar0 * vpar0;
+    
+        // neg - invalid initial energy state
+        if(H0 < 0.0 || H0 < Kpar0){
+            hit_energy_stop[threadIdx.x] = true;
+            stop_reason[threadIdx.x] = 3;
+            dt[threadIdx.x] = 0.0;
+        }
+    
+        // already at/through stopping threshold
+        if(use_energy_stop_d && !hit_energy_stop[threadIdx.x]){
+            if constexpr (id == RHS::GC_CartesianDragForward){
+                if(H0 <= H_stop_d){
+                    hit_energy_stop[threadIdx.x] = true;
+                    stop_reason[threadIdx.x] = 2;
+                    dt[threadIdx.x] = 0.0;
+                }
+            } else if constexpr (id == RHS::GC_CartesianDragBackward){
+                if(H0 >= H_stop_d){
+                    hit_energy_stop[threadIdx.x] = true;
+                    stop_reason[threadIdx.x] = 2;
+                    dt[threadIdx.x] = 0.0;
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    while(__syncthreads_count(
+        is_valid &&
+        !(t[threadIdx.x] >= tmax_d || has_left[threadIdx.x] || hit_energy_stop[threadIdx.x])
+    ) > 0){
+        for(int k = 0; k < 7; ++k){
+            if(is_valid){
+                build_state_cartesian_drag<id>(
+                    x_temp, k, symmetry_exploited,
+                    index_i, index_j, index_k,
+                    x1_shape, x2_shape, x3_shape,
+                    state, derivs, t, dt
+                );
+            }
+            __syncthreads();
+
+            calc_derivs_cartesian_drag<id>(
+                derivs, k, quadpts_arr, x_temp, symmetry_exploited,
+                index_i, index_j, index_k,
+                x1_shape, x2_shape, x3_shape,
+                nparticles_blk
+            );
+            __syncthreads();
+        }
+
+        if(is_valid){
+            adjust_time_cartesian_drag<id>(
+                t, dt, state, derivs, x_temp,
+                has_left, hit_energy_stop, stop_reason, dtmax
+            );
+        }
+        __syncthreads();
+    }
+
+    if(is_valid){
+        out[7 * idx + 0] = t[threadIdx.x];
+        out[7 * idx + 1] = state[0 * PARTICLES_PER_BLOCK + threadIdx.x];
+        out[7 * idx + 2] = state[1 * PARTICLES_PER_BLOCK + threadIdx.x];
+        out[7 * idx + 3] = state[2 * PARTICLES_PER_BLOCK + threadIdx.x];
+        out[7 * idx + 4] = state[3 * PARTICLES_PER_BLOCK + threadIdx.x];
+        out[7 * idx + 5] = state[4 * PARTICLES_PER_BLOCK + threadIdx.x];
+        out[7 * idx + 6] = (double)stop_reason[threadIdx.x];
+    }
+}
+
+
 template<RHS id, typename... Args>
+// NEW BY MARIA: added arg backward to this signature
 vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_range, py::array_t<double> x2_range, py::array_t<double> x3_range, 
-    py::array_t<double> loc_init, double m, double q, double vtotal, py::array_t<double> vtang, double tmax, double tol, int nparticles, Args... args){
+    py::array_t<double> loc_init, double m, double q, double vtotal, py::array_t<double> vtang, double tmax, double tol, int nparticles, bool backward=false, Args... args){
 
     //  read data in from python
     py::buffer_info loc_init_buf = loc_init.request();
@@ -990,6 +1672,10 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     gpuErrchk(cudaMemcpyToSymbol(rtol_d, &tol, sizeof(double)));
     gpuErrchk(cudaMemcpyToSymbol(v_total_d, &vtotal, sizeof(double)));
 
+    // NEW BY MARIA
+    int dir = backward ? -1 : 1;
+    gpuErrchk(cudaMemcpyToSymbol(dir_d, &dir, sizeof(int)));
+    //
 
     gpuErrchk(cudaMemcpyToSymbol(n_x2_d, &n_x2, sizeof(int)) );
     gpuErrchk(cudaMemcpyToSymbol(n_x3_d, &n_x3, sizeof(int)) );
@@ -1003,12 +1689,30 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
 
         double s = loc_init_arr[start];
         double theta = loc_init_arr[start+1];
+
+        // NEW BY MARIA: COORDINATE CONVENTION
+        double r   = loc_init_arr[start];
+        double phi = loc_init_arr[start + 1];
+        double z   = loc_init_arr[start + 2];
         
-        for(int j=0; j<3; j++){
-            init_pos[4*i + j] = loc_init_arr[start + j];
+        if constexpr (map_rhs_to_coord<id>() == CoordSys::Cartesian) {
+            init_pos[4*i + 0] = r * cos(phi);
+            init_pos[4*i + 1] = r * sin(phi);
+            init_pos[4*i + 2] = z;
+        } else {
+            init_pos[4*i + 0] = loc_init_arr[start + 0];
+            init_pos[4*i + 1] = loc_init_arr[start + 1];
+            init_pos[4*i + 2] = loc_init_arr[start + 2];
         }
+        
         init_pos[4*i + 3] = vtang_arr[i];
     }
+    //    
+        //for(int j=0; j<3; j++){
+        //    init_pos[4*i + j] = loc_init_arr[start + j];
+        //}
+        //init_pos[4*i + 3] = vtang_arr[i];
+    //}
    
     double* init_pos_d;
     gpuErrchk(cudaMalloc((void**)&init_pos_d, 4 * nparticles * sizeof(double)) );
@@ -1033,6 +1737,10 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     cudaEventCreate(&stop);
     cudaEventRecord(start);
     particle_trace_kernel<id><<<nblks, nthreads>>>(out_d, init_pos_d, quadpts_d, args...);
+    // NEW BY MARIA: added error checks
+    gpuErrchk(cudaPeekAtLastError());
+    gpuErrchk(cudaDeviceSynchronize());
+    //
 
     double out[5*nparticles];
     gpuErrchk(cudaMemcpy(out, out_d, 5 * nparticles * sizeof(double), cudaMemcpyDeviceToHost) );
@@ -1048,11 +1756,202 @@ vector<double> gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> x1_
     return particle_output;
 }
 
+
+// NEW BY MARIA: gpu tracing for drag
+template <RHS id>
+vector<double> gpu_tracing_cartesian_drag(
+    py::array_t<double> quad_pts,
+    py::array_t<double> x1_range,
+    py::array_t<double> x2_range,
+    py::array_t<double> x3_range,
+    py::array_t<double> loc_init,
+    double m,
+    double q,
+    double vtotal,
+    py::array_t<double> vtang,
+    py::array_t<double> H_init,
+    double coulomb_log,
+    bool Te_in_eV,
+    double tmax,
+    double tol,
+    int nparticles,
+    double H_stop = 0.0,
+    bool use_energy_stop = false
+){
+    py::buffer_info loc_init_buf = loc_init.request();
+    double* loc_init_arr = static_cast<double*>(loc_init_buf.ptr);
+
+    py::buffer_info vtang_buf = vtang.request();
+    double* vtang_arr = static_cast<double*>(vtang_buf.ptr);
+
+    py::buffer_info H_init_buf = H_init.request();
+    double* H_init_arr = static_cast<double*>(H_init_buf.ptr);
+
+    py::buffer_info quadpts_buf = quad_pts.request();
+    double* quadpts_arr = static_cast<double*>(quadpts_buf.ptr);
+
+    py::buffer_info x1_buf = x1_range.request();
+    double* x1_range_arr = static_cast<double*>(x1_buf.ptr);
+
+    py::buffer_info x2_buf = x2_range.request();
+    double* x2_range_arr = static_cast<double*>(x2_buf.ptr);
+
+    py::buffer_info x3_buf = x3_range.request();
+    double* x3_range_arr = static_cast<double*>(x3_buf.ptr);
+
+    double x1_range_ext[4];
+    double x2_range_ext[4];
+    double x3_range_ext[4];
+
+    for(int i = 0; i < 3; ++i){
+        x1_range_ext[i] = x1_range_arr[i];
+        x2_range_ext[i] = x2_range_arr[i];
+        x3_range_ext[i] = x3_range_arr[i];
+    }
+
+    x1_range_ext[3] = (x1_range_ext[1] - x1_range_ext[0]) / (x1_range_ext[2] - 1);
+    x2_range_ext[3] = (x2_range_ext[1] - x2_range_ext[0]) / (x2_range_ext[2] - 1);
+    x3_range_ext[3] = (x3_range_ext[1] - x3_range_ext[0]) / (x3_range_ext[2] - 1);
+
+    int n_x2 = (x2_range_ext[2] - 1) / 3;
+    int n_x3 = (x3_range_ext[2] - 1) / 3;
+    int n_x23 = n_x2 * n_x3;
+
+    gpuErrchk(cudaMemcpyToSymbol(x1_range_d, x1_range_ext, 4 * sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(x2_range_d, x2_range_ext, 4 * sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(x3_range_d, x3_range_ext, 4 * sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(tmax_d, &tmax, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(mass_d, &m, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(charge_d, &q, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(atol_d, &tol, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(rtol_d, &tol, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(v_total_d, &vtotal, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(H_stop_d, &H_stop, sizeof(double)));
+    gpuErrchk(cudaMemcpyToSymbol(use_energy_stop_d, &use_energy_stop, sizeof(bool)));
+
+    gpuErrchk(cudaMemcpyToSymbol(coulomb_log_d, &coulomb_log, sizeof(double)));
+    double Te_unit = Te_in_eV ? 1.602176634e-19 : 1.0;
+    gpuErrchk(cudaMemcpyToSymbol(Te_unit_d, &Te_unit, sizeof(double)));
+
+    gpuErrchk(cudaMemcpyToSymbol(n_x2_d, &n_x2, sizeof(int)));
+    gpuErrchk(cudaMemcpyToSymbol(n_x3_d, &n_x3, sizeof(int)));
+    gpuErrchk(cudaMemcpyToSymbol(n_x23_d, &n_x23, sizeof(int)));
+    gpuErrchk(cudaMemcpyToSymbol(nparticles_d, &nparticles, sizeof(int)));
+
+    std::vector<double> init_pos(5 * nparticles);
+
+    for(int i = 0; i < nparticles; ++i){
+        int start = 3 * i;
+
+        double r   = loc_init_arr[start + 0];
+        double phi = loc_init_arr[start + 1];
+        double z   = loc_init_arr[start + 2];
+
+        init_pos[5 * i + 0] = r * cos(phi);
+        init_pos[5 * i + 1] = r * sin(phi);
+        init_pos[5 * i + 2] = z;
+        init_pos[5 * i + 3] = vtang_arr[i];
+        init_pos[5 * i + 4] = H_init_arr[i];
+    }
+
+    double* init_pos_d;
+    gpuErrchk(cudaMalloc((void**)&init_pos_d, 5 * nparticles * sizeof(double)));
+    gpuErrchk(cudaMemcpy(init_pos_d, init_pos.data(), 5 * nparticles * sizeof(double), cudaMemcpyHostToDevice));
+
+    double* quadpts_d;
+    gpuErrchk(cudaMalloc((void**)&quadpts_d, quad_pts.size() * sizeof(double)));
+    gpuErrchk(cudaMemcpy(quadpts_d, quadpts_arr, quad_pts.size() * sizeof(double), cudaMemcpyHostToDevice));
+
+    double* out_d;
+    gpuErrchk(cudaMalloc((void**)&out_d, 7 * nparticles * sizeof(double)));
+
+    int nthreads = THREADS_PER_BLOCK;
+    int nblks = nparticles / PARTICLES_PER_BLOCK + 1;
+
+    particle_trace_kernel_cartesian_drag<id><<<nblks, nthreads>>>(out_d, init_pos_d, quadpts_d);
+    gpuErrchk(cudaPeekAtLastError());
+    gpuErrchk(cudaDeviceSynchronize());
+
+    std::vector<double> out(7 * nparticles);
+    gpuErrchk(cudaMemcpy(out.data(), out_d, 7 * nparticles * sizeof(double), cudaMemcpyDeviceToHost));
+
+    gpuErrchk(cudaFree(quadpts_d));
+    gpuErrchk(cudaFree(init_pos_d));
+    gpuErrchk(cudaFree(out_d));
+
+    return out;
+}
+
+
 extern "C" vector<double> cartesian_gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> srange,
         py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
         double tmax, double tol, int nparticles){
             return gpu_tracing<RHS::GC_CartesianVacuum>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles);
         }
+
+// NEW BY MARIA: cartesian backward entry point
+extern "C" vector<double> cartesian_gpu_tracing_backward(py::array_t<double> quad_pts, py::array_t<double> srange,
+        py::array_t<double> trange, py::array_t<double> zrange, py::array_t<double> stz_init, double m, double q, double vtotal, py::array_t<double> vtang, 
+        double tmax, double tol, int nparticles){
+            return gpu_tracing<RHS::GC_CartesianVacuum>(quad_pts, srange, trange, zrange, stz_init, m, q, vtotal, vtang, tmax, tol, nparticles, true);  // backward
+        }
+
+// NEW BY MARIA: new entrypoints for tracing with drag
+extern "C" vector<double> cartesian_gpu_tracing_drag(
+    py::array_t<double> quad_pts,
+    py::array_t<double> srange,
+    py::array_t<double> trange,
+    py::array_t<double> zrange,
+    py::array_t<double> stz_init,
+    double m,
+    double q,
+    double vtotal,
+    py::array_t<double> vtang,
+    py::array_t<double> H_init,
+    double coulomb_log,
+    bool Te_in_eV,
+    double tmax,
+    double tol,
+    int nparticles,
+    double H_stop,
+    bool use_energy_stop
+)
+{
+    return gpu_tracing_cartesian_drag<RHS::GC_CartesianDragForward>(
+        quad_pts, srange, trange, zrange,
+        stz_init, m, q, vtotal, vtang, H_init,
+        coulomb_log, Te_in_eV, tmax, tol, nparticles,
+        H_stop, use_energy_stop
+    );
+}
+
+extern "C" vector<double> cartesian_gpu_tracing_backward_drag(
+    py::array_t<double> quad_pts,
+    py::array_t<double> srange,
+    py::array_t<double> trange,
+    py::array_t<double> zrange,
+    py::array_t<double> stz_init,
+    double m,
+    double q,
+    double vtotal,
+    py::array_t<double> vtang,
+    py::array_t<double> H_init,
+    double coulomb_log,
+    bool Te_in_eV,
+    double tmax,
+    double tol,
+    int nparticles,
+    double H_stop,
+    bool use_energy_stop
+)
+{
+    return gpu_tracing_cartesian_drag<RHS::GC_CartesianDragBackward>(
+        quad_pts, srange, trange, zrange,
+        stz_init, m, q, vtotal, vtang, H_init,
+        coulomb_log, Te_in_eV, tmax, tol, nparticles,
+        H_stop, use_energy_stop
+    );
+}
 
 
 extern "C" vector<double> boozer_gpu_tracing(py::array_t<double> quad_pts, py::array_t<double> srange,
@@ -1256,14 +2155,23 @@ __device__ void account_for_symmetry<CoordSys::Boozer>(double* interpolants, boo
 template<RHS id, int n>
 __device__ void account_for_symmetry_rhs(double* interpolants, bool* symmetry_exploited){
     if(!symmetry_exploited[threadIdx.x]) return;
-    if constexpr (id == RHS::GC_CartesianVacuum){
-        interpolants[0] *= -1.0;
-        interpolants[4] *= -1.0;
-        interpolants[5] *= -1.0;
-    } else if constexpr (id == RHS::GC_BoozerVacuum || id == RHS::GC_BoozerVacuumSAW){
-        // Only theta/zeta derivatives flip sign
+
+    if constexpr (
+        id == RHS::GC_CartesianVacuum ||
+        id == RHS::GC_CartesianDragForward ||
+        id == RHS::GC_CartesianDragBackward
+    ){
+        interpolants[0] *= -1.0;  // B_r
+        interpolants[4] *= -1.0;  // d|B|/dphi
+        interpolants[5] *= -1.0;  // d|B|/dz
+
+    } else if constexpr (
+        id == RHS::GC_BoozerVacuum ||
+        id == RHS::GC_BoozerVacuumSAW
+    ){
         interpolants[2] *= -1.0;
         interpolants[3] *= -1.0;
+
     } else if constexpr (id == RHS::GC_Boozer){
         // 12-field ordering: flip dB/dtheta, dB/dzeta, and K
         interpolants[2] *= -1.0;  // d|B|/dtheta
@@ -1350,7 +2258,7 @@ extern "C" py::array_t<double> test_gpu_interpolation(py::array_t<double> quad_p
 
     // map input data
     // Cartesian Coordinates
-    if(rhs == "cartesian_vacuum"){
+    if(rhs == "cartesian_vacuum" || rhs == "cartesian_drag"){
         for(int i=0; i<n_points; ++i){
             double x = loc_arr[3*i] * cos(loc_arr[3*i + 1]);
             double y = loc_arr[3*i] * sin(loc_arr[3*i + 1]);
@@ -1380,6 +2288,9 @@ extern "C" py::array_t<double> test_gpu_interpolation(py::array_t<double> quad_p
         n = 10;
     } else if(rhs == "boozer"){
         n = 12;
+    // NEW BY MARIA
+    } else if(rhs == "cartesian_drag"){
+        n = 9;
     }
 
     // allocate and copy to device memory
@@ -1430,6 +2341,8 @@ extern "C" py::array_t<double> test_gpu_interpolation(py::array_t<double> quad_p
         test_gpu_interpolation_kernel<RHS::GC_BoozerVacuumSAW, 10><<<nblks, nthreads>>>(quadpts_d, loc_d, out_d, n_points);
     } else if(rhs == "boozer") {
         test_gpu_interpolation_kernel<RHS::GC_Boozer, 12><<<nblks, nthreads>>>(quadpts_d, loc_d, out_d, n_points);
+    } else if(rhs == "cartesian_drag") {
+        test_gpu_interpolation_kernel<RHS::GC_CartesianDragForward, 9><<<nblks, nthreads>>>(quadpts_d, loc_d, out_d, n_points);
     }
     double out[n*n_points];
     gpuErrchk( cudaMemcpy(&out, out_d, n*n_points * sizeof(double), cudaMemcpyDeviceToHost) );
@@ -1603,6 +2516,10 @@ py::array_t<double> test_gpu_derivatives(py::array_t<double> quad_pts, py::array
     double out[4*n_points];
     gpuErrchk( cudaMemcpy(&out, out_d, 4*n_points * sizeof(double), cudaMemcpyDeviceToHost) );
     auto result = py::array_t<double>(4*n_points, out);
+
+    // NEW BY MARIA: reset var is_test
+    is_test = false;
+    gpuErrchk(cudaMemcpyToSymbol(is_test_d, &is_test, sizeof(bool)));
     
     gpuErrchk( cudaFree(quadpts_d) );
     gpuErrchk( cudaFree(loc_d) );
@@ -1611,6 +2528,7 @@ py::array_t<double> test_gpu_derivatives(py::array_t<double> quad_pts, py::array
     gpuErrchk( cudaFree(out_d) );
 
     return result;
+
 }
 
 
@@ -1914,12 +2832,22 @@ vector<double> test_gpu_timestep(py::array_t<double> quad_pts, py::array_t<doubl
     return particle_output;
 }
 
+// NEW BY MARIA: changed st rescale_abstol_var is reset to true
 extern "C" vector<double> test_timestep_cartesian(py::array_t<double> quad_pts, py::array_t<double> x1_range,
         py::array_t<double> x2_range, py::array_t<double> x3_range, py::array_t<double> loc_init, double m, double q, double vtotal, py::array_t<double> vtang, 
         double tol, int nparticles){
     bool rescale_abstol_var = false;
     gpuErrchk(cudaMemcpyToSymbol(rescale_abstol_var_d, &rescale_abstol_var, sizeof(bool)) );
-    return test_gpu_timestep<RHS::GC_CartesianVacuum>(quad_pts, x1_range, x2_range, x3_range, loc_init, m, q, vtotal, vtang, tol, nparticles);
+
+    vector<double> out = test_gpu_timestep<RHS::GC_CartesianVacuum>(
+        quad_pts, x1_range, x2_range, x3_range, loc_init, m, q, vtotal, vtang, tol, nparticles
+    );
+
+    //
+    rescale_abstol_var = true;
+    gpuErrchk(cudaMemcpyToSymbol(rescale_abstol_var_d, &rescale_abstol_var, sizeof(bool)) );
+
+    return out;
 }
 
 extern "C" vector<double> test_timestep_boozer(py::array_t<double> quad_pts, py::array_t<double> x1_range,
