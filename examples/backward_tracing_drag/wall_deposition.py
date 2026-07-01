@@ -107,13 +107,11 @@ class Inputs:
     ne0: float = 1e21
     Te0_ev: float = 100.0
 
-    # Normalize the successful deposition pattern to this power.
-    # The resulting heat_flux_W_m2 integrates to deposition_power_W over bins
-    # with nonzero area. Default 1 W gives W/m^2 per deposited watt.
+    # Normalize the successful deposition pattern to this power
     deposition_power_W: float = 1.0
 
     # Tracing
-    n_wall: int = 1000
+    n_wall: int = 1000000
     tmax_backward: float = 5e-5
     tol: float = 1e-9
     seed: int = 57
